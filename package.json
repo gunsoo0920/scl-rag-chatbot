@@ -5,6 +5,8 @@
   "type": "module",
   "description": "SCL 공개 검사항목 데이터를 사용하는 RAG 안내 챗봇",
   "scripts": {
+    "postinstall": "node scripts/setup-environment.mjs",
+    "setup:env": "node scripts/setup-environment.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",

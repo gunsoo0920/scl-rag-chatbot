@@ -4,8 +4,27 @@ SCL 공개 검사항목 3,327개의 목록·상세 수집, RAG 지식 변환, Hy
 
 ## 실행
 
-```bash
+프로젝트를 처음 내려받은 뒤 패키지를 설치하면 `.env.example`을 사용해 로컬 `.env`가 자동 생성됩니다. 기존 `.env`는 덮어쓰지 않습니다.
+
+```powershell
 npm install
+```
+
+전체 AI 답변과 의미 기반 검색을 사용할 팀원은 생성된 `.env`에 본인의 서버 전용 Gemini API 키를 입력합니다. 실제 `.env`와 API 키는 Git에 올리지 않습니다. 키가 없어도 서버, 화면, 정확한 검사코드 검색과 테스트는 제한 모드로 실행됩니다.
+
+```powershell
+# 터미널 1
+npm run chatbot:server
+
+# 터미널 2
+npm run dev
+```
+
+브라우저에서 `http://127.0.0.1:5173`을 엽니다. 환경 파일만 다시 준비하려면 `npm run setup:env`를 실행할 수 있습니다.
+
+## 데이터 수집
+
+```bash
 npm run crawl:scl
 npm run crawl:validate
 ```
