@@ -1,0 +1,44 @@
+{
+  "name": "scl-rag-chatbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SCL 공개 검사항목 데이터를 사용하는 RAG 안내 챗봇",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "crawl:scl": "node scripts/crawl-scl-tests.mjs --all",
+    "crawl:scl:sample": "node scripts/crawl-scl-tests.mjs --start-page=1 --end-page=3",
+    "crawl:scl:details": "node scripts/crawl-scl-test-details.mjs --all",
+    "crawl:scl:details:batch": "node scripts/crawl-scl-test-details.mjs --limit=20",
+    "crawl:scl:details:sample": "node scripts/crawl-scl-test-details-sample.mjs",
+    "crawl:validate": "node scripts/validate-scl-tests.mjs",
+    "crawl:validate:details": "node scripts/validate-scl-test-details.mjs",
+    "crawl:validate:details:sample": "node scripts/validate-scl-test-details-sample.mjs",
+    "rag:knowledge": "node scripts/build-scl-test-knowledge.mjs",
+    "rag:knowledge:validate": "node scripts/validate-scl-test-knowledge.mjs",
+    "rag:index": "node scripts/build-rag-index.mjs",
+    "rag:index:validate": "node scripts/validate-rag-index.mjs",
+    "rag:search:smoke": "node scripts/smoke-rag-search.mjs",
+    "rag:search:evaluate": "node scripts/evaluate-rag-threshold.mjs",
+    "chatbot:server": "node server/chatbotServer.js",
+    "integration:validate": "node scripts/validate-frontend-integration.mjs",
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "test": "node --test",
+    "test:parser": "node scripts/crawl-scl-tests.mjs --start-page=1 --end-page=1 --fixture=tests/fixtures/scl-test-list-page-1.html"
+  },
+  "dependencies": {
+    "cheerio": "1.1.2",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@vitejs/plugin-react": "^6.0.1",
+    "vite": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

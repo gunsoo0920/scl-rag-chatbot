@@ -1,0 +1,14 @@
+{
+  "mode": "full",
+  "sourceRecords": 3327,
+  "completedRecords": 3326,
+  "remainingRecords": 1,
+  "failureRecords": 1,
+  "succeededThisRun": 0,
+  "failedThisRun": 1,
+  "requestDelayMs": 1000,
+  "concurrency": 1,
+  "startedAt": "2026-08-09T12:58:30.830Z",
+  "checkpointedAt": "2026-08-09T13:00:04.056Z",
+  "complete": false
+}

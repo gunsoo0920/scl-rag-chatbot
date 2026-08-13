@@ -1,0 +1,12 @@
+{
+  "mode": "full",
+  "sourceUrl": "https://www.scllab.co.kr/front/check/check_item_list.do?pageIndex=1",
+  "startPage": 1,
+  "endPage": 333,
+  "siteTotalPages": 333,
+  "siteTotalRecords": 3327,
+  "collectedRecords": 3327,
+  "requestDelayMs": 1000,
+  "startedAt": "2026-08-09T08:03:37.620Z",
+  "completedAt": "2026-08-09T08:09:55.440Z"
+}

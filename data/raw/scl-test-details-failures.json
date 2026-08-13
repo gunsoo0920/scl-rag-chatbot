@@ -1,0 +1,11 @@
+[
+  {
+    "id": "test-11010-204-c890ddff6349",
+    "testCode": "11010",
+    "testName": "Amino acid (CSF)",
+    "sourceUrl": "https://www.scllab.co.kr/front/check/check_item_detail.do?itemcode=11010&sampcode=204",
+    "attempts": 3,
+    "error": "The operation was aborted due to timeout",
+    "failedAt": "2026-08-09T13:00:04.056Z"
+  }
+]

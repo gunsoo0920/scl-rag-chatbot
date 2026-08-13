@@ -1,0 +1,8 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+.env
+*.tmp
+server/rag/index/vector-index.json
+server/rag/index/checkpoints/
