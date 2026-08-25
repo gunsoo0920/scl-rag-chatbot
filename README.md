@@ -213,3 +213,24 @@ SCL_DETAIL_REFRESH_INTERVAL_MS=604800000
 5. crawler egress, SCL rate limit, Qdrant volume/backup 정책을 확인합니다.
 
 현재 Codex 세션에는 배포 플랫폼용 플러그인이 연결되어 있지 않으므로 실제 production URL 생성, Qdrant Cloud 프로비저닝, Secret 등록과 Cron 배포는 자동 수행되지 않습니다.
+
+### Vercel Preview
+
+Vercel에서는 Vite 정적 UI와 `api/` Node Functions를 함께 배포합니다. 로컬 Docker Qdrant에는 접근할 수 없으므로 외부 Qdrant가 먼저 준비되어야 합니다.
+
+```bash
+npx vercel login
+npx vercel link
+npx vercel env add GEMINI_API_KEY preview
+npx vercel env add QDRANT_URL preview
+npx vercel env add QDRANT_API_KEY preview
+npx vercel env add QDRANT_COLLECTION preview
+npx vercel env add GEMINI_MODEL preview
+npx vercel env add GEMINI_EMBEDDING_MODEL preview
+npx vercel env add GEMINI_EMBEDDING_DIMENSION preview
+npx vercel env add RAG_TOP_K preview
+npx vercel env add RAG_MIN_SCORE preview
+npx vercel
+```
+
+`vercel`에 `--prod`를 붙이지 않으면 Preview deployment가 생성됩니다. Secret 값은 명령줄 인자로 넘기지 말고 CLI prompt 또는 Vercel Dashboard에서 등록합니다. 배포 후 `/api/health`가 `ok`이고 `collectionExists=true`인지 확인한 다음 Exact/Structured/Semantic 질문을 점검합니다.

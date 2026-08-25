@@ -1,0 +1,10 @@
+.env
+.vercel
+data
+server/rag/index
+server/rag/knowledge
+tests
+test-results
+playwright-report
+PROJECT_REPORT.md
+TROUBLESHOOTING.md

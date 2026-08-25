@@ -85,6 +85,22 @@ test('POST /api/chatbot/interpret는 구조화된 챗봇 응답을 반환한다'
   assert.equal(payload.sources[0].url, officialSource);
 });
 
+test('Vercel proxy의 동일 host HTTPS origin을 허용한다', async () => {
+  const response = await fetch(`${baseUrl}/api/chatbot/interpret`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'https://scl-preview.vercel.app',
+      Host: 'scl-preview.vercel.app',
+      'X-Forwarded-Host': 'scl-preview.vercel.app',
+      'X-Forwarded-Proto': 'https',
+    },
+    body: JSON.stringify({ question: 'ALT 검체는?' }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('access-control-allow-origin'), 'https://scl-preview.vercel.app');
+});
+
 test('빈 question과 잘못된 JSON을 400으로 거부한다', async () => {
   const emptyResponse = await fetch(`${baseUrl}/api/chatbot/interpret`, {
     method: 'POST',

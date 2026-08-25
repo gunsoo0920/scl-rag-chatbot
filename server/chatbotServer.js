@@ -45,6 +45,19 @@ function parseAllowedOrigins(value) {
     .filter(Boolean));
 }
 
+function isSameOriginRequest(request, origin) {
+  try {
+    const originUrl = new URL(origin);
+    const forwardedHost = String(request.headers['x-forwarded-host'] || request.headers.host || '').split(',')[0].trim();
+    const forwardedProtocol = String(request.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
+    return Boolean(forwardedHost)
+      && originUrl.host === forwardedHost
+      && originUrl.protocol === `${forwardedProtocol}:`;
+  } catch {
+    return false;
+  }
+}
+
 function setCommonHeaders(response, requestId) {
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
   response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -146,7 +159,7 @@ export function createChatbotRequestHandler({
   return async function chatbotRequestHandler(request, response) {
     const requestId = randomUUID();
     const origin = request.headers.origin;
-    if (origin && !allowedOrigins.has(origin)) {
+    if (origin && !allowedOrigins.has(origin) && !isSameOriginRequest(request, origin)) {
       writeJson(response, 403, { error: { code: 'ORIGIN_NOT_ALLOWED', message: '허용되지 않은 Origin입니다.', requestId } }, requestId);
       return;
     }
