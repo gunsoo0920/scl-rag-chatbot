@@ -1,7 +1,7 @@
 const STATUS_COPY = {
   checking: '서버 연결 확인 중',
   ready: '공식 공개정보 기반 안내',
-  degraded: 'AI 답변 기능 준비 중',
+  degraded: '일부 검색 기능 점검 필요',
   offline: '챗봇 서버 연결 안 됨',
 };
 

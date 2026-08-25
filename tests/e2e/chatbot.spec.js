@@ -209,5 +209,5 @@ test('degraded health 상태를 사용자에게 표시한다', async ({ page }) 
   await page.unroute('**/api/health');
   await mockHealth(page, 'degraded');
   await page.goto('/');
-  await expect(page.getByText('AI 답변 기능 준비 중')).toBeVisible();
+  await expect(page.getByText('일부 검색 기능 점검 필요')).toBeVisible();
 });

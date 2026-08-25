@@ -705,6 +705,18 @@ button:focus-visible, a:focus-visible, textarea:focus-visible {
 .result-support .resource-card__fallback { width: 38px; height: 38px; }
 
 .suggestions button span { min-width: 0; }
+.retrieval-path {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 7px;
+  border: 1px solid #c8d8e6;
+  border-radius: 999px;
+  color: #526c84;
+  background: #f5f9fc;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
 .suggestions button svg {
   width: 15px;
   flex: 0 0 auto;

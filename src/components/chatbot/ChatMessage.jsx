@@ -48,6 +48,12 @@ export default function ChatMessage({ message, onRetry }) {
           <AssistantAnswer text={message.text} highlighted={hasResults} />
         )}
 
+        {import.meta.env.DEV && message.status === 'success' && message.response?.retrievalPath && (
+          <span className="retrieval-path" aria-label={`검색 경로 ${message.response.retrievalPath}`}>
+            {message.response.retrievalPath}
+          </span>
+        )}
+
         {message.status === 'error' && (
           <button type="button" className="retry-button" onClick={() => onRetry(message)}>
             다시 시도

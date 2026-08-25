@@ -1,232 +1,215 @@
-# SCL RAG 안내 챗봇
+# SCL 검사정보 챗봇
 
-SCL 공개 검사항목 3,327개의 목록·상세 수집, RAG 지식 변환, Hybrid Retrieval, grounded 답변 검증, Node API와 React 챗봇 화면이 구현되어 있습니다. Gemini 벡터 인덱스 생성과 실제 답변 호출에는 API 키가 필요합니다.
+SCL 공개 검사정보를 대상으로 하는 intent-aware 검색 챗봇입니다.
 
-## 실행
+> DB에 있는 사실은 DB가 답하고, 비교 가능한 사실은 프로그램이 계산하며, 검색하기 어려운 자연어는 Vector Search가 찾고, 자연스러운 설명이 필요한 경우에만 LLM을 사용합니다.
 
-프로젝트를 처음 내려받은 뒤 패키지를 설치하면 `.env.example`을 사용해 로컬 `.env`가 자동 생성됩니다. 기존 `.env`는 덮어쓰지 않습니다.
+SCL 데이터를 주기적으로 확인하고 `contentHash`가 변경된 데이터만 갱신·재임베딩합니다. Qdrant를 런타임 저장소로 사용하므로 동기화 후 Node 서버를 재시작할 필요가 없습니다.
 
-```powershell
+## Architecture
+
+```mermaid
+flowchart TD
+  U[사용자 질문] --> S[Safety Gate]
+  S -->|의료 조언| B[고정 안전 응답]
+  S -->|허용| A[Query Analyzer]
+  A --> E[Entity / Intent / Field]
+  E --> R{Retrieval Router}
+  R -->|검사코드·정확한 검사명| X[Qdrant Payload Search]
+  R -->|Entity + Field| T[Qdrant Payload Search]
+  R -->|의미 검색 필요| M[Gemini Query Embedding]
+  M --> V[Qdrant Vector Query]
+  X --> D{답변 방식}
+  T --> D
+  V --> D
+  D -->|단일 필드·목록·비교| DR[Deterministic Response]
+  D -->|여러 근거의 자연어 설명| G[Gemini Generate]
+  G --> GV[Grounding / Safety Validator]
+  DR --> O[공식 출처·자료 조립]
+  GV --> O
+
+  SCL[SCL 웹사이트] --> C[Crawler]
+  C --> RAW[Raw JSON Snapshot]
+  RAW --> N[Normalize + Validation]
+  N --> H[contentHash Diff]
+  H -->|신규·의미 변경| EMB[Document Embedding]
+  H -->|metadata만 변경| PAY[Payload Update]
+  H -->|변경 없음| SKIP[No-op]
+  EMB --> Q[(Qdrant scl_tests)]
+  PAY --> Q
+```
+
+### 컴포넌트
+
+- React/Vite: 질문, loading, 오류/retry, 답변, 관련 검사, 공식 출처, PDF/이미지, 의료정보 제한 안내
+- Node API: Safety Gate, Query Analyzer, Retrieval Router, 결정적 응답, 생성·출력 검증, 통계, health check
+- Qdrant: exact payload 검색과 768차원 cosine vector 검색을 분리해 제공
+- Gemini Embedding: exact/structured로 풀 수 없는 의미 검색과 신규·의미 변경 문서에만 사용
+- Gemini Generate: 여러 공식 근거를 자연스럽게 설명해야 하는 `EXPLANATION`에서만 사용
+
+## 질문 분석
+
+`Query Analyzer`는 AI 호출 없이 다음을 분석합니다.
+
+- Entity: 검사코드, 복수 검사코드, 정규화된 검사명 후보
+- Intent: `FIELD_LOOKUP`, `COMPARISON`, `SEARCH`, `EXPLANATION`, `RESOURCE_REQUEST`, `MEDICAL_ADVICE`, `UNKNOWN`
+- Field: `testCode`, `testName`, `specimen`, `method`, `insuranceCode`, `schedule`, `timeType`, `turnaroundTime`, `sourceUrl`, `pdfUrls`, `imageUrls`
+
+명확한 표현만 alias로 연결합니다. 예를 들어 `며칠 걸려`, `결과 언제`, `소요일`은 `turnaroundTime`이고 `검체 종류`는 `specimen`입니다.
+
+## Retrieval과 답변
+
+### Exact
+
+검사코드 또는 정확한 검사명은 Qdrant payload index로 조회합니다. Query embedding, vector query, Generate 호출이 없습니다. 동일 `testCode`라도 `sampleCode`나 검체가 다르면 별도 point로 유지합니다.
+
+### Structured
+
+Entity와 Field가 확인되면 payload 값을 직접 답합니다.
+
+```text
+16290 검사 며칠 걸려?
+→ α-Galactosidase (GLA)_Fabry 검사의 소요일은 5일입니다.
+```
+
+Embedding 0회, Generate 0회입니다.
+
+### Comparison
+
+두 검사의 소요일을 직접 조회하고 보수적으로 파싱한 일수 범위를 프로그램이 비교합니다. 범위가 겹치거나 비교 대상이 없으면 빠르다/느리다를 추측하지 않습니다.
+
+### Semantic
+
+코드, 정확한 이름, 구조화 필드로 해결되지 않을 때만 질문을 `gemini-embedding-001`의 768차원 query vector로 변환합니다. Qdrant가 cosine score threshold와 top-K를 적용합니다. 검색 목록은 결정적으로 조립하므로 Generate를 다시 호출하지 않습니다.
+
+### Explanation
+
+여러 필드를 자연스럽게 정리할 필요가 있을 때만 Generate를 호출합니다. 모델에는 검색된 SCL evidence와 허용된 source ID만 전달합니다.
+
+## Qdrant
+
+- Collection: `scl_tests`
+- Vector: 768차원, Cosine
+- Payload: `id`, `testCode`, `sampleCode`, `testName`, `normalizedTestName`, `specimen`, `method`, `insuranceCode`, `schedule`, `timeType`, `turnaroundTime`, `content`, `keywords`, `sourceUrl`, `pdfUrls`, `imageUrls`, `crawledAt`, `updatedAt`, `contentHash`, `payloadHash`, `active`
+- Payload index: `id`, `testCode`, `sampleCode`, `normalizedTestName`, `contentHash`, `active`
+- Storage: Docker named volume `scl_qdrant_storage`
+
+기존 `server/rag/index/vector-index.json`은 런타임에서 사용하지 않습니다. 초기 migration에서 동일 문서 ID의 레거시 vector를 재사용할 수 있도록만 보존합니다.
+
+## 의료 안전성
+
+세 단계에서 방어합니다.
+
+1. 입력: 개인 결과 해석, 질병 진단, 약·복용법, 치료 결정, 개인 맞춤 검사 추천을 retrieval 전에 고정 응답으로 차단합니다.
+2. 생성: SCL evidence 밖 사실, 진단, 치료·약물 추천, 존재하지 않는 검사와 URL을 금지합니다.
+3. 출력: source ID, 공식 SCL HTTPS URL, 원문 evidence, evidence에 없는 수치, 진단·치료·약물 표현을 검증합니다. 위반한 생성 답변은 반환하지 않습니다.
+
+입력 차단 질문은 Embedding, Qdrant vector query, Generate 모두 0회입니다. 이 서비스는 의료적 진단용이 아닙니다.
+
+## 데이터 수집과 Near Real-Time Synchronization
+
+Raw JSON은 수집 기록, 디버깅, 회귀 테스트, 비교와 감사용입니다. 런타임 조회에는 사용하지 않습니다.
+
+```text
+SCL → 목록/상세 crawler → Raw snapshot → Knowledge JSON → validation → Qdrant sync
+```
+
+`npm run scl:sync`는 전체 목록을 예의 있는 rate limit으로 확인하고, 설정한 상세 refresh 주기보다 오래된 상세만 다시 수집한 뒤 Qdrant를 증분 갱신합니다. 공식 API/webhook이 없으므로 실시간이 아니라 Near Real-Time Synchronization입니다.
+
+증분 규칙은 다음과 같습니다.
+
+- 신규: embedding 후 upsert
+- `contentHash` 변경: 해당 point만 재embedding 후 upsert
+- URL/자료 등 payload metadata만 변경: vector 없이 payload update
+- 변경 없음: embedding과 update 없음
+- 사라진 항목: 즉시 삭제하지 않고 `active=false`
+- 실패 기록이 있거나 신규 스냅샷이 기존 active 데이터의 80% 미만이면 비활성화 생략
+
+동기화는 `scanned`, `created`, `updated`, `unchanged`, `deactivated`, `embeddingCalls`, `embeddedDocuments`, `failures`를 로그합니다. Qdrant를 요청마다 조회하므로 갱신 후 Node 재시작이 필요하지 않습니다.
+
+Node 내부 scheduler는 `SCL_SYNC_ENABLED=true`일 때 `SCL_SYNC_INTERVAL`(밀리초)마다 실행됩니다. 운영에서는 플랫폼 Scheduled Job/Cron으로 `npm run scl:sync`를 실행하는 편을 권장합니다. 최소 1시간 이상으로 설정하고 SCL 사이트에 과도한 부하를 주지 마세요.
+
+## AI 호출량과 성능
+
+`GET /api/stats`는 사용자 원문을 저장하지 않고 다음 카운터와 경로별 평균 latency를 메모리에 집계합니다.
+
+`totalQueries`, `exactQueries`, `structuredQueries`, `comparisonQueries`, `vectorQueries`, `embeddingCalls`, `generationCalls`, `blockedMedicalQueries`, `noResultQueries`, `embeddingBypassRate`, `generationBypassRate`
+
+서버 실행 중 `npm run benchmark:queries`로 Exact, Structured, Comparison, Vector를 각각 측정할 수 있습니다. 기본 3회이며 Vector 시나리오는 실행마다 실제 query embedding 비용이 발생합니다. 반복 수는 `CHATBOT_BENCHMARK_ITERATIONS`로 조절합니다.
+
+## 로컬 실행
+
+요구사항: Node.js 20.19 이상, Docker/Compose, Gemini API key.
+
+```bash
+docker compose up -d
 npm install
-```
-
-전체 AI 답변과 의미 기반 검색을 사용할 팀원은 생성된 `.env`에 본인의 서버 전용 Gemini API 키를 입력합니다. 실제 `.env`와 API 키는 Git에 올리지 않습니다. 키가 없어도 서버, 화면, 정확한 검사코드 검색과 테스트는 제한 모드로 실행됩니다.
-
-```powershell
-# 터미널 1
+npm run qdrant:health
+npm run qdrant:seed
 npm run chatbot:server
-
-# 터미널 2
 npm run dev
 ```
 
-브라우저에서 `http://127.0.0.1:5173`을 엽니다. 환경 파일만 다시 준비하려면 `npm run setup:env`를 실행할 수 있습니다.
+첫 시드에서는 Knowledge JSON과 ID가 같은 레거시 vector를 우선 재사용합니다. 레거시 vector가 없거나 신규 문서이면 Gemini API key가 필요합니다.
 
-## 데이터 수집
-
-```bash
-npm run crawl:scl
-npm run crawl:validate
-```
-
-`npm run crawl:scl`은 첫 페이지에서 현재 마지막 페이지와 총건수를 읽은 뒤 전체 검사항목을 순차적으로 요청합니다. 동시 요청 없이 페이지 사이에 기본 1초 간격을 두며, 전체 수집과 검증이 끝나기 전에는 기존 결과를 교체하지 않습니다.
-
-1~3페이지만 다시 확인하려면 다음 명령을 사용합니다.
+별도 터미널에서 다음을 사용할 수 있습니다.
 
 ```bash
-npm run crawl:scl:sample
-```
-
-대표 검사항목의 상세 페이지 파서와 이미지 추출을 확인하려면 다음 명령을 사용합니다.
-
-```bash
-npm run crawl:scl:details:sample
-npm run crawl:validate:details:sample
-```
-
-전체 상세 페이지는 중단 후 재개 가능한 크롤러로 수집합니다.
-
-```bash
-npm run crawl:scl:details        # 남은 상세 페이지 전체 수집
-npm run crawl:scl:details:batch  # 다음 20건만 수집
-npm run crawl:validate:details   # 현재 체크포인트 검증
-```
-
-상세 크롤러는 기존 완료 레코드를 건너뛰고 10건마다 원자적 체크포인트를 저장합니다. 실패 항목은 별도 JSON에 기록하며 다음 실행에서 다시 시도합니다. 기본 요청 간격은 1초이고 기본 동시성은 1입니다. 동시 실행으로 체크포인트가 충돌하지 않도록 PID 기반 잠금 파일을 사용하며, 동시성 설정은 최대 2로 제한합니다.
-
-결과는 `data/raw/scl-tests-raw.json`에 저장됩니다. 같은 검사코드라도 검체가 다를 수 있으므로 검사코드, 검사명, 검체 코드, 검체명, 검사방법의 조합으로 안정적인 ID를 생성합니다. 수집 범위와 사이트 총건수, 완료 시각은 `data/raw/scl-tests-crawl-report.json`에 별도로 저장됩니다.
-
-상세 페이지 샘플은 `data/raw/scl-test-details-sample.json`에 저장되며 보존방법, 소요량, 참고치, 임상적 의의, 급여 관련 정보와 검체용기 이미지 URL을 포함합니다.
-
-전체 상세 데이터와 진행 상태는 다음 파일에 저장됩니다.
-
-- `data/raw/scl-test-details-raw.json`
-- `data/raw/scl-test-details-failures.json`
-- `data/raw/scl-test-details-crawl-report.json`
-
-## RAG 지식 데이터 생성
-
-전체 목록과 상세 데이터를 병합하고 검사항목별 독립 지식 문서를 생성합니다.
-
-```bash
-npm run rag:knowledge
-npm run rag:knowledge:validate
-```
-
-정규화 데이터는 `data/processed/scl-tests.json`, 검색용 지식 문서는 `server/rag/knowledge/scl-tests.json`에 저장됩니다. 키워드는 공식 검사코드, 검사명, 검사방법, 검체명과 공개 코드만 사용하며 사이트에 없는 동의어나 설명을 추가하지 않습니다.
-
-## Gemini 벡터 인덱스 생성
-
-`.env.example`을 `.env`로 복사하고 서버 전용 Gemini API 키를 설정합니다. 키를 프런트엔드 코드에 넣지 마세요.
-
-```bash
-Copy-Item .env.example .env
-# .env의 GEMINI_API_KEY 값을 설정
-npm run rag:index
-npm run rag:index:validate
-```
-
-기본 모델은 `gemini-embedding-001`, 출력 차원은 768입니다. 문서는 `RETRIEVAL_DOCUMENT`, 이후 검색 질의는 `RETRIEVAL_QUERY`로 임베딩합니다. 768차원 벡터는 L2 정규화한 뒤 `server/rag/index/vector-index.json`에 저장하며 검색에서는 cosine similarity를 사용합니다.
-
-빌더는 무료 티어의 TPM 제한을 고려해 기본 5개 단위, 15초 간격으로 요청하고 각 성공 배치를 `server/rag/index/checkpoints/`에 저장합니다. 429 응답에 `RetryInfo`가 있으면 서버가 지정한 시간만큼 기다리고, 없으면 기본 60초 후 재시도합니다. 실행이 중단돼도 같은 모델·차원·원문이면 완료된 배치를 재사용하며, 지식 문서가 바뀌면 SHA-256 해시로 오래된 벡터를 감지합니다. 배치 크기, 요청 간격, timeout과 재시도 횟수는 `.env`에서 조절할 수 있습니다.
-
-주요 환경변수:
-
-- `GEMINI_API_KEY`: 필수 서버 전용 키
-- `GEMINI_EMBEDDING_MODEL`: 기본 `gemini-embedding-001`
-- `GEMINI_EMBEDDING_DIMENSION`: 기본 `768`
-- `GEMINI_EMBEDDING_BATCH_SIZE`: 무료 티어 권장 `5`
-- `GEMINI_EMBEDDING_REQUEST_DELAY_MS`: 무료 티어 권장 `15000`
-- `GEMINI_EMBEDDING_BUILD_QUOTA_RETRY_DELAY_MS`: 429 응답의 최소 재시도 대기시간, 기본 `60000`
-- `RAG_TOP_K`: 기본 `5`
-- `RAG_MIN_SIMILARITY`: 현재 평가값 `0.60` (정상 질의 최저 `0.6643`, 범위 밖 질의 최고 `0.5366`, 평가 중간값 `0.6005`)
-
-임베딩 요청 형식, 정규화, vector dimension, cosine similarity, threshold와 topK 단위 테스트는 다음 명령으로 실행합니다.
-
-```bash
+npm run scl:sync
+npm run scl:sync:data
+npm run benchmark:queries
 npm test
-```
-
-## Hybrid Retrieval
-
-검색은 검사코드 exact match, 검사명 phrase/token match, 공식 keyword match, Gemini embedding cosine similarity를 결합합니다. 검사코드 exact match에는 semantic 점수보다 높은 우선순위를 주며, `ALT`가 `Cobalt`나 `MALToma`의 내부 문자열과 잘못 일치하지 않도록 영문·숫자 경계를 구분합니다.
-
-현재 API 키와 vector index가 없더라도 실제 3,327개 지식 문서를 대상으로 lexical 검색을 확인할 수 있습니다.
-
-```bash
-npm run rag:search:smoke
-npm run rag:search:smoke -- "10130 검사 알려줘"
-npm run rag:search:evaluate
-```
-
-API 키와 vector index가 있으면 smoke 명령은 semantic 검색도 실행하고 각 결과의 cosine similarity를 출력합니다. `RAG_MIN_SIMILARITY`가 비어 있으면 평가를 위해 smoke에서만 similarity 필터를 해제하며, 운영 API의 semantic 검색은 평가값을 설정하기 전까지 활성화되지 않습니다.
-
-Semantic 검색은 유효한 vector index와 embedding service가 모두 연결된 경우에만 활성화됩니다. `RAG_MIN_SIMILARITY`는 실제 인덱스로 검색 평가를 마친 뒤 설정해야 하며, 평가값 없이 semantic 검색을 활성화하면 서버가 명확한 오류로 중단합니다.
-
-## Grounded Gemini 답변 생성
-
-답변 생성 기본 모델은 구조화 출력을 지원하는 안정 버전 `gemini-3.1-flash-lite`이며 `GEMINI_MODEL`로 변경할 수 있습니다. 기존 `gemini-2.5-flash-lite`는 신규 사용자에게 제공되지 않으므로 사용하지 않습니다. Gemini에는 검색된 문서만 전달하고 다음 규칙을 적용합니다.
-
-- SCL 참고자료에 없는 검사정보, 진단, 치료 및 복약 정보를 추측하지 않음
-- 답변과 실제 사용한 `sourceId`, 원문의 연속된 evidence 구절만 구조화 JSON으로 생성
-- evidence가 크롤링된 원문에 실제로 존재하는지 서버에서 검증
-- 모델이 반환한 source ID가 검색 결과에 포함됐는지 검증
-- 모델이 저장되지 않은 URL을 반환하면 응답 거부
-- 출처·검사정보·PDF·이미지는 모델이 아닌 서버가 저장된 SCL 자료에서 조립
-- 검색 결과가 없으면 Gemini를 호출하지 않고 범위 밖 응답 반환
-
-실제 Gemini 호출에는 `.env`의 `GEMINI_API_KEY`가 필요하지만, 요청 구조·grounding·위조 URL·원문 evidence·범위 밖 응답은 모의 응답 테스트로 검증할 수 있습니다.
-
-```bash
-npm test
-```
-
-## Node chatbot API
-
-상시 실행 서버는 별도 데이터베이스 없이 Node.js 서버 하나만 사용합니다.
-
-```bash
-npm run chatbot:server
-```
-
-기본 주소는 `http://127.0.0.1:3002`이며 다음 API를 제공합니다.
-
-- `GET /api/health`: 지식 문서 수, vector index, semantic 검색, Gemini 생성 상태
-- `POST /api/chatbot/interpret`: `{ "question": "ALT 검체는?" }` 요청
-
-```bash
-curl http://127.0.0.1:3002/api/health
-curl -X POST http://127.0.0.1:3002/api/chatbot/interpret \
-  -H "Content-Type: application/json" \
-  -d '{"question":"ALT 검사 알려줘"}'
-```
-
-API 키가 없어도 서버는 `degraded` 상태로 시작합니다. 범위 밖 질문은 Gemini 호출 없이 응답하고, 검색 자료가 있어 Gemini 생성이 필요한 질문은 `503 GENERATION_UNAVAILABLE`을 반환합니다. API 경계에서는 32KB 본문 제한, 질문 길이 제한, JSON Content-Type, 허용 Origin, 구조화 응답 및 공식 SCL HTTPS URL을 다시 검증합니다.
-
-관련 환경변수:
-
-- `CHATBOT_HOST`: 기본 `127.0.0.1`
-- `CHATBOT_PORT`: 기본 `3002`
-- `CHATBOT_ALLOWED_ORIGINS`: 기본 Vite 개발 서버의 localhost/127.0.0.1 포트 5173
-
-## React 챗봇 화면
-
-두 개의 터미널에서 Node chatbot API와 Vite 프런트엔드를 실행합니다.
-
-```bash
-# 터미널 1
-npm run chatbot:server
-
-# 터미널 2
-npm run dev
-```
-
-브라우저에서 `http://127.0.0.1:5173`을 엽니다. Vite 개발 서버는 `/api` 요청을 `127.0.0.1:3002`로 전달합니다. 다른 API 주소를 사용할 때만 `VITE_CHATBOT_API_URL`을 설정합니다. `VITE_` 환경변수는 브라우저 번들에 포함되므로 API 키를 넣으면 안 됩니다.
-
-화면은 Enter 전송, Shift+Enter 줄바꿈, loading, 오류와 재시도, 자동 스크롤, 관련 검사 카드, 공식 출처 링크, PDF와 이미지 미리보기, 모바일 레이아웃을 지원합니다.
-
-```bash
-npm run build
-npm run preview
-```
-
-프런트엔드 진입 페이지, Vite API proxy, Node health, 키 없는 범위 밖 응답과 생성 서비스 503 경로를 한 번에 검증하려면 다음 명령을 사용합니다. 검증기는 사용 가능한 임시 포트에서 두 서버를 실행하고 완료 후 종료합니다.
-
-```bash
-npm run integration:validate
-```
-
-## Playwright E2E
-
-E2E 테스트는 실제 Vite 화면을 열고 API 요청을 브라우저에서 모의하여 API 키 없이 재현 가능하게 실행합니다. Windows에서는 설치된 Microsoft Edge를 사용하고, 그 외 환경에서는 Playwright Chromium을 사용합니다.
-
-```bash
 npm run test:e2e
+npm run build
 ```
 
-검증 범위:
+`scl:sync:data`는 live crawl 없이 현재 Knowledge JSON과 Qdrant만 비교합니다.
 
-- 초기 화면과 서버 상태
-- 질문 입력, Enter 전송, Shift+Enter 줄바꿈
-- loading과 자동 스크롤
-- 답변, 관련 검사, 공식 출처, 이미지와 PDF
-- 범위 밖 질문
-- API 오류와 다시 시도
-- 모바일 레이아웃과 가로 스크롤 방지
+## API
 
-Edge 대신 다른 Playwright 채널을 사용하려면 `PLAYWRIGHT_BROWSER_CHANNEL`을 설정합니다. Chromium이 설치되지 않은 환경에서는 먼저 `npx playwright install chromium`을 실행합니다.
+- `POST /api/chatbot/interpret` body: `{ "question": "16290 며칠 걸려?" }`
+- `GET /api/health`: Node, Qdrant 연결, collection, point count, vector dimension, Embedding/Generate 설정 상태. 유료 Gemini 호출 없음
+- `GET /api/stats`: AI 우회율과 검색 경로별 latency
 
-네트워크 없이 실제 DOM 구조의 회귀 픽스처로 파서와 저장 경로만 확인하려면 다음 명령을 사용할 수 있습니다.
+개발 UI에서만 응답의 `EXACT`, `STRUCTURED`, `COMPARISON`, `VECTOR`, `BLOCKED` 경로 badge를 표시합니다. production bundle에는 이 badge가 렌더링되지 않습니다.
 
-```bash
-npm run test:parser
+## 환경변수
+
+`.env.example`을 `.env`로 복사하고 값을 설정합니다. `.env`와 secret은 Git에 커밋하지 않습니다.
+
+```dotenv
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+GEMINI_EMBEDDING_DIMENSION=768
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
+QDRANT_COLLECTION=scl_tests
+RAG_TOP_K=5
+RAG_MIN_SCORE=0.60
+SCL_SYNC_ENABLED=false
+SCL_SYNC_INTERVAL=86400000
+SCL_DETAIL_REFRESH_INTERVAL_MS=604800000
 ```
 
-온라인 수집 레코드는 `captureMode: "live"`, 회귀 픽스처 검증 결과는 `captureMode: "fixture"`로 구분됩니다.
+## 테스트
 
-## 데이터 출처
+- Unit: Query Analyzer, Safety Gate, vector/embedding 유틸리티, grounding validator
+- Integration: intent-aware Qdrant router, 결정적 응답, 증분 sync, API handler
+- API: health, CORS, payload 제한, 오류와 공식 URL 검증
+- E2E: Playwright 기반 desktop/mobile UI, loading/error/retry/source/resource
+- Production: `npm run build`
 
-- 목록: <https://www.scllab.co.kr/front/check/check_item_list.do>
-- 상세: `https://www.scllab.co.kr/front/check/check_item_detail.do?itemcode={검사코드}&sampcode={검체코드}`
+필수 회귀 시나리오는 exact/structured/natural structured/comparison/ambiguous comparison/semantic/medical/incremental sync를 포함합니다.
 
-공개 HTML의 `tr[onclick*="fnActExamView"]` 행과 실제 `fnActExamView(itemcode, sampcode)` 호출값을 사용합니다.
+## 운영 배포
+
+운영은 React/Node 배포 환경과 외부 접근 가능한 Qdrant를 분리합니다. 운영 환경에서 `localhost:6333`을 사용하지 마세요.
+
+1. Qdrant Cloud 또는 운영 Qdrant collection을 준비합니다.
+2. `QDRANT_URL`, `QDRANT_API_KEY`, `GEMINI_API_KEY`를 플랫폼 Secret으로 등록합니다.
+3. build/start 명령을 설정하고 `/api/health`가 `ok`인지 확인합니다.
+4. Scheduled Job에 `npm run scl:sync`를 등록합니다.
+5. crawler egress, SCL rate limit, Qdrant volume/backup 정책을 확인합니다.
+
+현재 Codex 세션에는 배포 플랫폼용 플러그인이 연결되어 있지 않으므로 실제 production URL 생성, Qdrant Cloud 프로비저닝, Secret 등록과 Cron 배포는 자동 수행되지 않습니다.
