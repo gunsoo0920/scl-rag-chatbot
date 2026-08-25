@@ -39,6 +39,8 @@ flowchart TD
   PAY --> Q
 ```
 
+상세 구성과 사용자·동기화 흐름은 [architecture.md](architecture.md)와 [bpmn.md](bpmn.md)를 참고합니다.
+
 ### 컴포넌트
 
 - React/Vite: 질문, loading, 오류/retry, 답변, 관련 검사, 공식 출처, PDF/이미지, 의료정보 제한 안내
@@ -92,7 +94,8 @@ Embedding 0회, Generate 0회입니다.
 - Vector: 768차원, Cosine
 - Payload: `id`, `testCode`, `sampleCode`, `testName`, `normalizedTestName`, `specimen`, `method`, `insuranceCode`, `schedule`, `timeType`, `turnaroundTime`, `content`, `keywords`, `sourceUrl`, `pdfUrls`, `imageUrls`, `crawledAt`, `updatedAt`, `contentHash`, `payloadHash`, `active`
 - Payload index: `id`, `testCode`, `sampleCode`, `normalizedTestName`, `contentHash`, `active`
-- Storage: Docker named volume `scl_qdrant_storage`
+- Preview storage: Qdrant Cloud Free cluster
+- Local storage: Docker named volume `scl_qdrant_storage`
 
 기존 `server/rag/index/vector-index.json`은 런타임에서 사용하지 않습니다. 초기 migration에서 동일 문서 ID의 레거시 vector를 재사용할 수 있도록만 보존합니다.
 
@@ -217,6 +220,8 @@ Qdrant Cloud 프로비저닝과 운영 Secret 관리는 배포 플랫폼 밖에�
 ### Vercel Preview
 
 Vercel에서는 Vite 정적 UI와 `api/` Node Functions를 함께 배포합니다. 로컬 Docker Qdrant에는 접근할 수 없으므로 외부 Qdrant가 먼저 준비되어야 합니다.
+
+현재 Preview는 `https://scl-rag-chatbot-b4yxo085s-gunsoo0920.vercel.app`에 배포되어 있고 `/api/health`는 `ok`, Qdrant point count는 3,327입니다. Vercel Authentication이 활성화되어 있어 인증 없는 외부 사용자는 로그인 화면으로 이동합니다. 외부 테스트에는 Deployment의 Shareable Link를 발급하거나 Project Settings에서 Deployment Protection 정책을 변경합니다.
 
 ```bash
 npx vercel login
