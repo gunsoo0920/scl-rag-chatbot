@@ -24,13 +24,20 @@
     "rag:index:validate": "node scripts/validate-rag-index.mjs",
     "rag:search:smoke": "node scripts/smoke-rag-search.mjs",
     "rag:search:evaluate": "node scripts/evaluate-rag-threshold.mjs",
+    "qdrant:health": "node scripts/qdrant-health.mjs",
+    "qdrant:seed": "node scripts/qdrant-seed.mjs",
+    "scl:sync": "node scripts/scl-sync.mjs",
+    "scl:sync:data": "node scripts/scl-sync.mjs --skip-crawl",
+    "scl:sync:simulate": "node scripts/simulate-incremental-sync.mjs",
     "chatbot:server": "node server/chatbotServer.js",
+    "benchmark:queries": "node scripts/benchmark-queries.mjs",
     "integration:validate": "node scripts/validate-frontend-integration.mjs",
     "test:e2e": "node scripts/run-e2e.mjs",
     "test": "node --test",
     "test:parser": "node scripts/crawl-scl-tests.mjs --start-page=1 --end-page=1 --fixture=tests/fixtures/scl-test-list-page-1.html"
   },
   "dependencies": {
+    "@qdrant/js-client-rest": "^1.19.0",
     "cheerio": "1.1.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

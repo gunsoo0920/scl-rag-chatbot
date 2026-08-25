@@ -16,6 +16,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPTS = 3;
 const CHECKPOINT_INTERVAL = 10;
 const MAX_CONCURRENCY = 2;
+const DETAIL_REFRESH_INTERVAL_MS = Number(process.env.SCL_DETAIL_REFRESH_INTERVAL_MS || 7 * 24 * 60 * 60 * 1000);
 let releaseLock = async () => {};
 
 function parseLimit() {
@@ -160,6 +161,9 @@ async function main() {
   if (!Number.isInteger(CONCURRENCY) || CONCURRENCY < 1 || CONCURRENCY > MAX_CONCURRENCY) {
     throw new Error(`SCL_DETAIL_CRAWL_CONCURRENCY는 1-${MAX_CONCURRENCY} 범위여야 합니다.`);
   }
+  if (!Number.isFinite(DETAIL_REFRESH_INTERVAL_MS) || DETAIL_REFRESH_INTERVAL_MS < 60 * 60 * 1000) {
+    throw new Error('SCL_DETAIL_REFRESH_INTERVAL_MS는 1시간 이상이어야 합니다.');
+  }
 
   const sourceRecords = JSON.parse(await readFile(LIST_PATH, 'utf8'));
   const sourceById = new Map(sourceRecords.map((record) => [record.id, record]));
@@ -171,9 +175,10 @@ async function main() {
         (record) =>
           sourceById.has(record.id) &&
           sourceById.get(record.id).sourceUrl === record.sourceUrl &&
-          record.detailCrawledAt,
+          record.detailCrawledAt &&
+          Date.now() - Date.parse(record.detailCrawledAt) < DETAIL_REFRESH_INTERVAL_MS,
       )
-      .map((record) => [record.id, record]),
+      .map((record) => [record.id, { ...record, ...sourceById.get(record.id), detailCrawledAt: record.detailCrawledAt }]),
   );
   const failuresById = new Map(
     existingFailures.filter((failure) => sourceById.has(failure.id)).map((failure) => [failure.id, failure]),

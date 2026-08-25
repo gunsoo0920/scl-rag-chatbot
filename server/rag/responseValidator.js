@@ -1,3 +1,5 @@
+import { assertSafeGeneratedOutput } from './safetyGate.js';
+
 function uniqueBy(values, keySelector) {
   const seen = new Set();
   return values.filter((value) => {
@@ -47,6 +49,7 @@ export function validateGeneratedAnswer(payload, retrievedDocuments) {
   if (typeof payload.answer !== 'string' || !payload.answer.trim()) {
     throw new Error('Gemini 응답의 answer가 비어 있습니다.');
   }
+  assertSafeGeneratedOutput(payload.answer);
   if (payload.answer.length > 5000) throw new Error('Gemini 응답의 answer가 너무 깁니다.');
   if (typeof payload.grounded !== 'boolean') throw new Error('Gemini 응답의 grounded는 boolean이어야 합니다.');
   if (!Array.isArray(payload.sourceIds) || payload.sourceIds.some((id) => typeof id !== 'string')) {
@@ -92,6 +95,16 @@ export function validateGeneratedAnswer(payload, retrievedDocuments) {
   const storedUrls = collectStoredUrls(retrievedDocuments);
   for (const url of extractUrls(payload.answer)) {
     if (!storedUrls.has(url)) throw new Error(`저장된 자료에 없는 URL이 답변에 포함되었습니다: ${url}`);
+  }
+
+  const groundedContent = retrievedDocuments.map((document) => String(document.content ?? '')).join('\n');
+  const factualTokens = payload.answer.match(/\d+(?:[.,]\d+)*(?:\s*(?:일|시간|분|mL|mg|ng|IU|%))?/giu) ?? [];
+  for (const token of factualTokens) {
+    const compactToken = token.replace(/\s+/g, '');
+    const compactContent = groundedContent.replace(/\s+/g, '');
+    if (!compactContent.includes(compactToken)) {
+      throw new Error(`Evidence에 없는 수치가 답변에 포함되었습니다: ${token}`);
+    }
   }
 
   return {
@@ -142,9 +155,11 @@ export function buildSafeChatbotResponse(validatedAnswer, retrievedDocuments) {
     matchedTests: selectedDocuments.map((document) => ({
       id: document.id,
       testCode: document.testCode,
+      sampleCode: document.sampleCode,
       testName: document.testName,
       specimen: document.specimen,
       method: document.method,
+      insuranceCode: document.insuranceCode,
       schedule: document.schedule,
       timeType: document.timeType,
       turnaroundTime: document.turnaroundTime,

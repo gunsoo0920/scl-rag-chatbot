@@ -1,16 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnvironment } from './loadEnvironment.js';
 import { GeminiEmbeddingService } from './rag/embeddingService.js';
-import { GeminiGenerationService, RagAnswerService } from './rag/ragAnswerService.js';
-import { loadRetrievalService } from './rag/retrievalService.js';
+import { GeminiGenerationService } from './rag/ragAnswerService.js';
+import { IntentAwareAnswerService } from './rag/intentAwareAnswerService.js';
+import { QueryMetrics } from './rag/queryMetrics.js';
+import { QdrantStore } from './rag/qdrantStore.js';
+import { RetrievalRouter } from './rag/retrievalRouter.js';
 import { isOfficialSclUrl } from './rag/responseValidator.js';
 
 const SERVER_DIRECTORY = dirname(fileURLToPath(import.meta.url));
-const VECTOR_INDEX_PATH = resolve(SERVER_DIRECTORY, 'rag', 'index', 'vector-index.json');
+const PROJECT_ROOT = resolve(SERVER_DIRECTORY, '..');
 const DEFAULT_BODY_LIMIT_BYTES = 32 * 1024;
 
 export class HttpError extends Error {
@@ -123,12 +126,17 @@ export function validateChatbotApiResponse(payload) {
     throw new Error('grounded가 false인 응답에는 출처나 검사 자료를 포함할 수 없습니다.');
   }
   if (payload.grounded && payload.sources.length === 0) throw new Error('grounded 응답에는 공식 출처가 필요합니다.');
+  if (!['EXACT', 'STRUCTURED', 'COMPARISON', 'VECTOR', 'BLOCKED', 'NO_RESULT'].includes(payload.retrievalPath)) {
+    throw new Error('챗봇 응답의 retrievalPath가 올바르지 않습니다.');
+  }
   return payload;
 }
 
 export function createChatbotRequestHandler({
   answerService,
   serviceStatus = {},
+  healthCheck = null,
+  metrics = null,
   allowedOrigins = parseAllowedOrigins(process.env.CHATBOT_ALLOWED_ORIGINS),
   bodyLimitBytes = DEFAULT_BODY_LIMIT_BYTES,
   logger = console,
@@ -159,10 +167,19 @@ export function createChatbotRequestHandler({
     try {
       const url = new URL(request.url, 'http://localhost');
       if (request.method === 'GET' && url.pathname === '/api/health') {
+        const currentStatus = healthCheck ? await healthCheck() : serviceStatus;
+        const healthy = currentStatus.nodeApi !== false
+          && currentStatus.qdrantConnected !== false
+          && currentStatus.collectionExists !== false;
         writeJson(response, 200, {
-          status: serviceStatus.generationAvailable ? 'ok' : 'degraded',
-          services: serviceStatus,
+          status: healthy ? 'ok' : 'degraded',
+          services: currentStatus,
         }, requestId);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/stats') {
+        writeJson(response, 200, metrics?.snapshot?.() ?? {}, requestId);
         return;
       }
 
@@ -181,7 +198,7 @@ export function createChatbotRequestHandler({
     } catch (error) {
       const statusCode = Number.isInteger(error.statusCode) ? error.statusCode : 500;
       const code = error.code || 'INTERNAL_ERROR';
-      const message = statusCode >= 500 && !(error instanceof ServiceUnavailableError)
+      const message = statusCode >= 500 && statusCode !== 503
         ? '챗봇 답변을 처리하는 중 오류가 발생했습니다.'
         : error.message;
       if (statusCode >= 500 && !(error instanceof ServiceUnavailableError)) {
@@ -198,32 +215,64 @@ export function createChatbotServer(options) {
 
 export async function createRuntimeServices({
   apiKey = process.env.GEMINI_API_KEY,
-  vectorIndexPath = VECTOR_INDEX_PATH,
+  store = new QdrantStore(),
+  metrics = new QueryMetrics(),
 } = {}) {
-  const vectorIndexAvailable = existsSync(vectorIndexPath);
-  const similarityConfigured = process.env.RAG_MIN_SIMILARITY !== undefined
-    && process.env.RAG_MIN_SIMILARITY !== '';
-  const embeddingService = apiKey?.trim() && vectorIndexAvailable && similarityConfigured
+  const embeddingService = apiKey?.trim()
     ? new GeminiEmbeddingService({ apiKey })
     : null;
-  const retrievalService = await loadRetrievalService({
-    indexPath: vectorIndexPath,
-    embeddingService,
-  });
   const generationAvailable = Boolean(apiKey?.trim());
   const generationService = generationAvailable
     ? new GeminiGenerationService({ apiKey })
     : new UnavailableGenerationService();
+  const router = new RetrievalRouter({ store, embeddingService, metrics });
+  const answerService = new IntentAwareAnswerService({ router, generationService, metrics });
+  const healthCheck = async () => {
+    const qdrant = await store.health();
+    return {
+      nodeApi: true,
+      qdrantConnected: qdrant.connected,
+      collectionExists: qdrant.collectionExists,
+      collection: qdrant.collection,
+      pointCount: qdrant.pointCount,
+      vectorDimension: qdrant.dimension,
+      embeddingConfigured: Boolean(apiKey?.trim() && process.env.GEMINI_EMBEDDING_MODEL && process.env.GEMINI_EMBEDDING_DIMENSION),
+      generationAvailable,
+    };
+  };
 
   return {
-    answerService: new RagAnswerService({ retrievalService, generationService }),
-    serviceStatus: {
-      generationAvailable,
-      semanticSearchAvailable: retrievalService.semanticAvailable,
-      vectorIndexAvailable,
-      knowledgeDocuments: retrievalService.documents.length,
-    },
+    answerService,
+    serviceStatus: await healthCheck(),
+    healthCheck,
+    metrics,
   };
+}
+
+export function startSyncScheduler({ logger = console } = {}) {
+  if (String(process.env.SCL_SYNC_ENABLED).toLowerCase() !== 'true') return () => {};
+  const interval = Number(process.env.SCL_SYNC_INTERVAL || 24 * 60 * 60 * 1000);
+  if (!Number.isSafeInteger(interval) || interval < 60 * 60 * 1000) throw new Error('SCL_SYNC_INTERVAL은 1시간 이상의 밀리초 값이어야 합니다.');
+  let running = false;
+  const timer = setInterval(() => {
+    if (running) return;
+    running = true;
+    const child = spawn(process.execPath, [resolve(PROJECT_ROOT, 'scripts/scl-sync.mjs')], {
+      cwd: PROJECT_ROOT,
+      env: process.env,
+      stdio: 'inherit',
+    });
+    child.once('error', (error) => {
+      logger.error?.(`SCL scheduled sync 시작 실패: ${error.message}`);
+      running = false;
+    });
+    child.once('exit', (code) => {
+      if (code !== 0) logger.error?.(`SCL scheduled sync 실패: 종료 코드 ${code}`);
+      running = false;
+    });
+  }, interval);
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 async function main() {
@@ -234,16 +283,21 @@ async function main() {
 
   const runtime = await createRuntimeServices();
   const server = createChatbotServer(runtime);
+  const stopScheduler = startSyncScheduler();
   server.requestTimeout = 35000;
   server.headersTimeout = 10000;
   server.listen(port, host, () => {
     console.log(`SCL chatbot server: http://${host}:${port}`);
-    console.log(`Generation: ${runtime.serviceStatus.generationAvailable ? 'available' : 'unavailable'}`);
-    console.log(`Semantic search: ${runtime.serviceStatus.semanticSearchAvailable ? 'available' : 'unavailable'}`);
-    console.log(`Knowledge documents: ${runtime.serviceStatus.knowledgeDocuments}`);
+    console.log(`Qdrant: ${runtime.serviceStatus.qdrantConnected ? 'connected' : 'unavailable'}`);
+    console.log(`Collection: ${runtime.serviceStatus.collectionExists ? `${runtime.serviceStatus.pointCount} points` : 'missing'}`);
+    console.log(`Embedding: ${runtime.serviceStatus.embeddingConfigured ? 'configured' : 'unavailable'}`);
+    console.log(`Generation: ${runtime.serviceStatus.generationAvailable ? 'configured' : 'unavailable'}`);
   });
 
-  const shutdown = () => server.close(() => process.exit(0));
+  const shutdown = () => {
+    stopScheduler();
+    server.close(() => process.exit(0));
+  };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
 }

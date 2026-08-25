@@ -22,6 +22,7 @@ const validResponse = {
   }],
   sources: [{ id: 'knowledge-test-10130', title: 'ALT 검사정보', url: officialSource }],
   resources: [],
+  retrievalPath: 'STRUCTURED',
 };
 
 let server;
@@ -44,9 +45,9 @@ test.before(async () => {
     answerService,
     serviceStatus: {
       generationAvailable: false,
-      semanticSearchAvailable: false,
-      vectorIndexAvailable: false,
-      knowledgeDocuments: 3327,
+      qdrantConnected: false,
+      collectionExists: false,
+      pointCount: 0,
     },
     bodyLimitBytes: 128,
     logger: { error() {} },
@@ -62,12 +63,12 @@ test.after(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
-test('GET /api/health는 키 없는 degraded 상태와 문서 수를 반환한다', async () => {
+test('GET /api/health는 Qdrant 미연결 degraded 상태를 반환한다', async () => {
   const response = await fetch(`${baseUrl}/api/health`);
   const payload = await response.json();
   assert.equal(response.status, 200);
   assert.equal(payload.status, 'degraded');
-  assert.equal(payload.services.knowledgeDocuments, 3327);
+  assert.equal(payload.services.qdrantConnected, false);
   assert.equal(typeof response.headers.get('x-request-id'), 'string');
 });
 
@@ -157,17 +158,30 @@ test('공식 SCL이 아닌 출력 URL은 API 경계에서 다시 거부한다', 
   assert.equal(payload.error.message, '챗봇 답변을 처리하는 중 오류가 발생했습니다.');
 });
 
-test('실제 키 없는 런타임도 범위 밖 질문과 정확한 검사코드 질문을 결정적으로 처리한다', async () => {
+test('키 없는 Qdrant 런타임도 범위 밖 질문과 정확한 검사코드 질문을 결정적으로 처리한다', async () => {
+  const exactDocument = {
+    id: 'knowledge-test-10130', testCode: '10130', sampleCode: '100', testName: 'ALT', specimen: 'Serum',
+    method: 'Enzymatic method', schedule: '월~토', timeType: '주간', turnaroundTime: '1일',
+    content: '검사명: ALT\nSCL 검사코드: 10130\n검체명: Serum\n검사 소요일: 1일',
+    sourceUrl: officialSource, pdfUrls: [], imageUrls: [], resources: [],
+  };
+  const store = {
+    dimension: 768,
+    health: async () => ({ connected: true, collectionExists: true, collection: 'scl_tests', pointCount: 1, dimension: 768 }),
+    findByTestCodes: async () => [exactDocument],
+    findByExactName: async () => [],
+    semanticSearch: async () => [],
+  };
   const runtime = await createRuntimeServices({
     apiKey: '',
-    vectorIndexPath: 'Z:\\definitely-missing\\vector-index.json',
+    store,
   });
   assert.equal(runtime.serviceStatus.generationAvailable, false);
-  assert.equal(runtime.serviceStatus.knowledgeDocuments, 3327);
+  assert.equal(runtime.serviceStatus.pointCount, 1);
 
   const outOfScope = await runtime.answerService.answer('오늘 날씨 알려줘');
   assert.equal(outOfScope.grounded, false);
-  assert.match(outOfScope.answer, /일상적인 대화에는 답변할 수 없습니다/);
+  assert.match(outOfScope.answer, /검사정보 안내 전용/);
   const exactCode = await runtime.answerService.answer('10130 검사 알려줘');
   assert.equal(exactCode.grounded, true);
   assert.equal(exactCode.matchedTests[0].testCode, '10130');

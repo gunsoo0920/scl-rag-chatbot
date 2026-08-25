@@ -6,3 +6,4 @@ test-results/
 *.tmp
 server/rag/index/vector-index.json
 server/rag/index/checkpoints/
+data/raw/.scl-detail-crawl.lock
