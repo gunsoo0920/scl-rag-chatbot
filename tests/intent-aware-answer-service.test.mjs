@@ -17,12 +17,14 @@ function document({ code, sample = '100', name, specimen, turnaround }) {
 const fabry = document({ code: '16290', sample: '510', name: 'α-Galactosidase (GLA)_Fabry', specimen: 'Heparin W/B', turnaround: '5일' });
 const microUrine = document({ code: '11380', sample: '400', name: 'α1-microglobulin (RU)', specimen: 'Urine,random', turnaround: '30일' });
 const microSerum = document({ code: '11380', sample: '100', name: 'α1-microglobulin (S)', specimen: 'Serum', turnaround: '30일' });
+const alt = document({ code: '10130', sample: '100', name: 'ALT', specimen: 'Serum', turnaround: '1일' });
+const ast = document({ code: '10120', sample: '100', name: 'AST', specimen: 'Serum', turnaround: '2일' });
 
 function setup() {
   let embeddingCalls = 0;
   let generationCalls = 0;
   let storeCalls = 0;
-  const documents = [fabry, microUrine, microSerum];
+  const documents = [fabry, microUrine, microSerum, alt, ast];
   const store = {
     findByTestCodes: async (codes) => {
       storeCalls += 1;
@@ -31,6 +33,11 @@ function setup() {
     findByExactName: async (name) => {
       storeCalls += 1;
       return documents.filter((item) => item.testName.toLocaleLowerCase('ko-KR') === name.toLocaleLowerCase('ko-KR'));
+    },
+    findByExactNames: async (names) => {
+      storeCalls += 1;
+      const normalizedNames = new Set(names.map((name) => name.toLocaleLowerCase('ko-KR')));
+      return documents.filter((item) => normalizedNames.has(item.testName.toLocaleLowerCase('ko-KR')));
     },
     semanticSearch: async () => {
       storeCalls += 1;
@@ -98,4 +105,32 @@ test('의료 조언은 Qdrant와 AI 호출 전에 차단한다', async () => {
   assert.equal(runtime.calls().embeddingCalls, 0);
   assert.equal(runtime.calls().generationCalls, 0);
   assert.equal(runtime.metrics.snapshot().blockedMedicalQueries, 1);
+});
+
+test('다양한 어순의 ALT field 질문은 batch exact 조회로 처리한다', async () => {
+  const runtime = setup();
+  const questions = [
+    'ALT 검사는 어떤 검체를 사용하나요?',
+    '검체는 ALT 검사에서 뭘 사용해?',
+    '소요일이 궁금한 검사는 ALT야',
+    'ALT에 대해서 검체만 확인해줘',
+  ];
+  for (const question of questions) {
+    const response = await runtime.service.answer(question);
+    assert.equal(response.retrievalPath, 'STRUCTURED');
+    assert.deepEqual(response.matchedTests.map((item) => item.testCode), ['10130']);
+  }
+  assert.equal(runtime.calls().embeddingCalls, 0);
+  assert.equal(runtime.calls().generationCalls, 0);
+  assert.equal(runtime.calls().storeCalls, questions.length);
+});
+
+test('검사코드가 없는 복수 검사명 비교도 두 exact 결과를 보존한다', async () => {
+  const runtime = setup();
+  const response = await runtime.service.answer('ALT와 AST 중 어떤 검사가 더 빨라?');
+  assert.equal(response.retrievalPath, 'COMPARISON');
+  assert.deepEqual(new Set(response.matchedTests.map((item) => item.testCode)), new Set(['10130', '10120']));
+  assert.match(response.answer, /10130.*10120보다 소요일이 짧습니다/);
+  assert.equal(runtime.calls().embeddingCalls, 0);
+  assert.equal(runtime.calls().generationCalls, 0);
 });

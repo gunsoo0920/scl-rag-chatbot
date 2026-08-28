@@ -18,4 +18,7 @@ integrationTest('실제 Qdrant collection과 payload exact lookup을 검증한�
   assert.equal(documents.filter((document) => document.testCode === '16290').length, 1);
   assert.equal(documents.filter((document) => document.testCode === '11380').length, 2);
   assert.equal(documents.find((document) => document.testCode === '16290').turnaroundTime, '5일');
+
+  const exactNames = await store.findByExactNames(['ALT', '존재하지 않는 검사명']);
+  assert.deepEqual(exactNames.map((document) => document.testCode), ['10130']);
 });

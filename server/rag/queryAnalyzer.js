@@ -28,6 +28,18 @@ const COMPARISON_PATTERN = /(?:비교|차이|중\s*(?:어떤|뭐|무엇)|더\s*(
 const EXPLANATION_PATTERN = /(?:전체적|자세히|종합|설명|의의|알기\s*쉽게)/iu;
 const RESOURCE_PATTERN = /(?:pdf|이미지|사진|검체용기|공식\s*(?:원문|링크)|출처|자료\s*(?:보여|줘|주세요))/iu;
 const QUESTION_NOISE = /(?:안녕하세요|안녕|검사정보|검사\s*정보|검사|관련해서|관련|대해서|대한|좀|알려\s*줘|알려줘|알려\s*주세요|보여\s*줘|보여줘|뭐\s*있어|무엇이\s*있어|뭐야|인가요|주세요|해줘|설명해줘|정보)+/giu;
+const NAME_TOKEN_SEPARATOR = /[?!,;:"“”'‘’{}]+/gu;
+const MIXED_NAME_CHARACTER = /[a-z0-9α-ω]/iu;
+const ATTACHED_PARTICLE = /^(.*[a-z0-9α-ω)\]_+\-])(?:에서는|에서|에게|한테|으로|부터|까지|처럼|보다|하고|이랑|랑|와|과|은|는|이|가|을|를|의|에|도|만|야)$/iu;
+const MAX_NAME_CANDIDATES = 128;
+const MAX_CANDIDATE_WORDS = 8;
+const NAME_CANDIDATE_STOP_WORDS = new Set([
+  '검사', '검사는', '검사의', '검사를', '검사가', '검사에서', '검사로', '검사만',
+  '결과', '결과는', '정보', '관련', '관련해서', '대해서', '대한', '어떤', '무슨',
+  '알려줘', '알려주세요', '사용하나요', '사용해', '궁금해', '궁금한', '뭐야', '무엇',
+  '은', '는', '이', '가', '을', '를', '의', '에', '도', '만', '와', '과', '랑', '이랑',
+  ...Object.values(FIELD_ALIASES).flat().map(normalizeTestName),
+]);
 
 function findField(normalizedQuestion) {
   const entries = Object.entries(FIELD_ALIASES)
@@ -46,6 +58,61 @@ function extractCandidateName(question, codes, field) {
   return candidate;
 }
 
+function stripAttachedParticle(token) {
+  if (!MIXED_NAME_CHARACTER.test(token)) return token;
+  return token.match(ATTACHED_PARTICLE)?.[1] || token;
+}
+
+function candidateTokens(question) {
+  return String(question)
+    .normalize('NFKC')
+    .replace(NAME_TOKEN_SEPARATOR, ' ')
+    .split(/\s+/u)
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function meaningfulNameCandidate(value) {
+  const normalized = normalizeTestName(value);
+  return normalized.length >= 2 && !NAME_CANDIDATE_STOP_WORDS.has(normalized);
+}
+
+export function extractTestNameCandidates(question, codes = [], field = null) {
+  const candidates = [];
+  const seen = new Set();
+  const add = (value) => {
+    const normalized = normalizeTestName(value);
+    if (!meaningfulNameCandidate(normalized) || seen.has(normalized) || candidates.length >= MAX_NAME_CANDIDATES) return;
+    seen.add(normalized);
+    candidates.push(String(value).trim());
+  };
+
+  add(extractCandidateName(question, codes, field));
+  const tokens = candidateTokens(question);
+
+  // “A 말고 B”에서는 제외 대상 A보다 B를 먼저 검증한다.
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    if (['말고', '대신'].includes(normalizeTestName(tokens[index]))) add(stripAttachedParticle(tokens[index + 1]));
+  }
+
+  // ALT, HbA1c처럼 영문·숫자·그리스 문자가 포함된 검사명은 문장 위치와 관계없이 우선 후보로 둔다.
+  for (const token of tokens) {
+    const stripped = stripAttachedParticle(token);
+    if (MIXED_NAME_CHARACTER.test(stripped)) add(stripped);
+  }
+
+  // 실제 검사명 검증은 Qdrant keyword match가 담당하므로, 연속 어절 후보를 길이순으로 만든다.
+  const maximumWords = Math.min(MAX_CANDIDATE_WORDS, tokens.length);
+  for (let wordCount = maximumWords; wordCount >= 1 && candidates.length < MAX_NAME_CANDIDATES; wordCount -= 1) {
+    for (let start = 0; start + wordCount <= tokens.length && candidates.length < MAX_NAME_CANDIDATES; start += 1) {
+      const words = tokens.slice(start, start + wordCount);
+      words[words.length - 1] = stripAttachedParticle(words.at(-1));
+      add(words.join(' '));
+    }
+  }
+  return candidates;
+}
+
 export function analyzeQuery(question) {
   const value = String(question ?? '').trim();
   const normalizedQuestion = normalizeTestName(value);
@@ -60,12 +127,15 @@ export function analyzeQuery(question) {
   else if (/[\p{L}\p{N}]/u.test(value)) intent = INTENTS.SEARCH;
   else intent = INTENTS.UNKNOWN;
 
+  const testNameCandidates = extractTestNameCandidates(value, testCodes, field);
+
   return {
     original: value,
     normalizedQuestion,
     entity: {
       testCodes,
-      testName: extractCandidateName(value, testCodes, field),
+      testName: testNameCandidates[0] ?? null,
+      testNameCandidates,
       multiple: testCodes.length > 1,
     },
     intent,

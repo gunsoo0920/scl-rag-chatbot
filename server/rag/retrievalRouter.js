@@ -1,3 +1,5 @@
+import { normalizeTestName } from './contentIdentity.js';
+
 export const RETRIEVAL_PATHS = Object.freeze({
   EXACT: 'EXACT',
   STRUCTURED: 'STRUCTURED',
@@ -30,9 +32,30 @@ export class RetrievalRouter {
       return { path: documents.length ? exactPath(analysis) : RETRIEVAL_PATHS.NO_RESULT, documents };
     }
 
-    if (analysis.entity.testName) {
-      const exactDocuments = await this.store.findByExactName(analysis.entity.testName);
-      if (exactDocuments.length > 0) return { path: exactPath(analysis), documents: exactDocuments };
+    const nameCandidates = analysis.entity.testNameCandidates?.length
+      ? analysis.entity.testNameCandidates
+      : (analysis.entity.testName ? [analysis.entity.testName] : []);
+    if (nameCandidates.length > 0) {
+      const exactDocuments = this.store.findByExactNames
+        ? await this.store.findByExactNames(nameCandidates)
+        : await this.store.findByExactName(nameCandidates[0]);
+      if (exactDocuments.length > 0) {
+        if (analysis.intent === 'COMPARISON') {
+          return { path: exactPath(analysis), documents: exactDocuments };
+        }
+        const documentsByName = new Map();
+        for (const document of exactDocuments) {
+          const normalizedName = normalizeTestName(document.normalizedTestName || document.testName);
+          const documents = documentsByName.get(normalizedName) ?? [];
+          documents.push(document);
+          documentsByName.set(normalizedName, documents);
+        }
+        const selected = nameCandidates
+          .map(normalizeTestName)
+          .map((candidate) => documentsByName.get(candidate))
+          .find((documents) => documents?.length > 0);
+        if (selected) return { path: exactPath(analysis), documents: selected };
+      }
     }
 
     if (!this.embeddingService) {

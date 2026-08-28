@@ -140,7 +140,7 @@ API 키가 스크린샷, 로그 또는 메시지에 노출되면 즉시 폐기�
 
 ## 9. 현재 배포
 
-- Preview: https://scl-rag-chatbot-b4yxo085s-gunsoo0920.vercel.app
+- Preview: https://scl-rag-chatbot-1du1267ac-gunsoo0920.vercel.app
 - Environment: Preview
 - Deployment Protection: Vercel Authentication
 

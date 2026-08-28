@@ -63,7 +63,7 @@ flowchart LR
 
 ### 현재 Preview 상태
 
-- Preview URL: `https://scl-rag-chatbot-b4yxo085s-gunsoo0920.vercel.app`
+- Preview URL: `https://scl-rag-chatbot-1du1267ac-gunsoo0920.vercel.app`
 - 배포 상태: `Preview / Ready`
 - Health: `ok`
 - Qdrant: `scl_tests`, 3,327 points, 768차원 Cosine
@@ -86,8 +86,8 @@ flowchart TD
 
     ANALYZE --> CODE{"검사코드가 있는가?"}
     CODE -->|예| CODE_SEARCH["Qdrant testCode payload 검색"]
-    CODE -->|아니오| NAME{"정확한 검사명 후보가 있는가?"}
-    NAME -->|예| NAME_SEARCH["Qdrant normalizedTestName 검색"]
+    CODE -->|아니오| NAME{"질문 전체에서 검사명 후보가 있는가?"}
+    NAME -->|예| NAME_SEARCH["Qdrant normalizedTestName<br/>match any 1회"]
     NAME_SEARCH -->|정확 일치| SELECT
     NAME_SEARCH -->|불일치| VECTOR
     NAME -->|아니오| VECTOR["Gemini query embedding"]
@@ -146,7 +146,9 @@ flowchart TD
 ### Safety Gate와 Query Analyzer
 
 - 개인 검사결과 해석, 진단, 치료·약물, 개인 맞춤 검사 추천을 검색 전에 차단
-- LLM 호출 없이 검사코드, 검사명 후보, intent, field 분석
+- LLM 호출 없이 검사코드, 질문 전체의 검사명 후보 목록, intent, field 분석
+- 검사명 위치를 앞부분으로 고정하지 않고 영문·숫자·그리스 문자 토큰과 최대 8어절 후보를 최대 128개 생성
+- 후보별 요청 대신 Qdrant `normalizedTestName match any` 한 번으로 실제 검사명만 검증
 - 지원 intent: `FIELD_LOOKUP`, `COMPARISON`, `SEARCH`, `EXPLANATION`, `RESOURCE_REQUEST`, `UNKNOWN`
 
 ### Qdrant Cloud

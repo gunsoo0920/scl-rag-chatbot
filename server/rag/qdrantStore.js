@@ -118,9 +118,13 @@ export class QdrantStore {
   }
 
   async findByExactName(testName) {
-    const normalizedName = normalizeTestName(testName);
-    if (!normalizedName) return [];
-    const points = await this.#scroll(activeFilter([{ key: 'normalizedTestName', match: { value: normalizedName } }]));
+    return this.findByExactNames([testName]);
+  }
+
+  async findByExactNames(testNames) {
+    const normalizedNames = [...new Set(testNames.map(normalizeTestName).filter(Boolean))];
+    if (normalizedNames.length === 0) return [];
+    const points = await this.#scroll(activeFilter([{ key: 'normalizedTestName', match: { any: normalizedNames } }]));
     return points.map((point) => payloadFromPoint(point)).filter(Boolean);
   }
 

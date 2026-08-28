@@ -53,17 +53,19 @@ flowchart TD
 
 `Query Analyzer`는 AI 호출 없이 다음을 분석합니다.
 
-- Entity: 검사코드, 복수 검사코드, 정규화된 검사명 후보
+- Entity: 검사코드, 복수 검사코드, 질문 전체에서 만든 정규화 검사명 후보 목록
 - Intent: `FIELD_LOOKUP`, `COMPARISON`, `SEARCH`, `EXPLANATION`, `RESOURCE_REQUEST`, `MEDICAL_ADVICE`, `UNKNOWN`
 - Field: `testCode`, `testName`, `specimen`, `method`, `insuranceCode`, `schedule`, `timeType`, `turnaroundTime`, `sourceUrl`, `pdfUrls`, `imageUrls`
 
 명확한 표현만 alias로 연결합니다. 예를 들어 `며칠 걸려`, `결과 언제`, `소요일`은 `turnaroundTime`이고 `검체 종류`는 `specimen`입니다.
 
+검사명은 문장 첫 단어로 고정하지 않습니다. 영문·숫자·그리스 문자 토큰과 최대 8개 연속 어절 후보를 질문 전체에서 만들고, 최대 128개를 한 번의 Qdrant `normalizedTestName match any` 검색으로 검증합니다. 실제 검사명과 일치한 후보만 Exact로 확정하므로 후보별 네트워크 요청이나 부분 문자열 오인을 피합니다.
+
 ## Retrieval과 답변
 
 ### Exact
 
-검사코드 또는 정확한 검사명은 Qdrant payload index로 조회합니다. Query embedding, vector query, Generate 호출이 없습니다. 동일 `testCode`라도 `sampleCode`나 검체가 다르면 별도 point로 유지합니다.
+검사코드 또는 질문 어느 위치에 있든 확인된 정확한 검사명은 Qdrant payload index로 조회합니다. Query embedding, vector query, Generate 호출이 없습니다. 동일 `testCode`라도 `sampleCode`나 검체가 다르면 별도 point로 유지합니다.
 
 ### Structured
 
@@ -221,7 +223,7 @@ Qdrant Cloud 프로비저닝과 운영 Secret 관리는 배포 플랫폼 밖에�
 
 Vercel에서는 Vite 정적 UI와 `api/` Node Functions를 함께 배포합니다. 로컬 Docker Qdrant에는 접근할 수 없으므로 외부 Qdrant가 먼저 준비되어야 합니다.
 
-현재 Preview는 `https://scl-rag-chatbot-b4yxo085s-gunsoo0920.vercel.app`에 배포되어 있고 `/api/health`는 `ok`, Qdrant point count는 3,327입니다. Vercel Authentication이 활성화되어 있어 인증 없는 외부 사용자는 로그인 화면으로 이동합니다. 외부 테스트에는 Deployment의 Shareable Link를 발급하거나 Project Settings에서 Deployment Protection 정책을 변경합니다.
+현재 Preview는 `https://scl-rag-chatbot-1du1267ac-gunsoo0920.vercel.app`에 배포되어 있고 `/api/health`는 `ok`, Qdrant point count는 3,327입니다. Vercel Authentication이 활성화되어 있어 인증 없는 외부 사용자는 로그인 화면으로 이동합니다. 외부 테스트에는 Deployment의 Shareable Link를 발급하거나 Project Settings에서 Deployment Protection 정책을 변경합니다.
 
 ```bash
 npx vercel login
