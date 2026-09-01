@@ -60,6 +60,7 @@ function TestCard({ test }) {
     { key: 'specimen', label: '검체', value: test.specimen },
     { key: 'turnaround', label: '소요일', value: test.turnaroundTime },
     { key: 'method', label: '검사방법', value: test.method },
+    { key: 'insurance', label: '보험코드', value: test.insuranceCode },
     { key: 'schedule', label: '검사일', value: test.schedule },
   ].filter(({ value }) => value);
 

@@ -35,6 +35,7 @@ function AssistantAnswer({ text, highlighted }) {
 export default function ChatMessage({ message, onRetry }) {
   const isUser = message.role === 'user';
   const hasResults = message.response?.matchedTests?.length > 0;
+  const resultsOnly = hasResults && message.response?.presentation === 'RESULTS_ONLY';
 
   return (
     <article className={`message message--${message.role}`} data-testid={`message-${message.role}`}>
@@ -44,9 +45,9 @@ export default function ChatMessage({ message, onRetry }) {
           <LoadingMessage />
         ) : isUser ? (
           <p className="message__text">{message.text}</p>
-        ) : (
+        ) : !resultsOnly ? (
           <AssistantAnswer text={message.text} highlighted={hasResults} />
-        )}
+        ) : null}
 
         {import.meta.env.DEV && message.status === 'success' && message.response?.retrievalPath && (
           <span className="retrieval-path" aria-label={`검색 경로 ${message.response.retrievalPath}`}>

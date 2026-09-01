@@ -2,13 +2,13 @@ import { performance } from 'node:perf_hooks';
 
 const COUNTERS = [
   'totalQueries', 'exactQueries', 'structuredQueries', 'comparisonQueries', 'vectorQueries',
-  'embeddingCalls', 'generationCalls', 'blockedMedicalQueries', 'noResultQueries',
+  'embeddingCalls', 'generationCalls', 'blockedMedicalQueries', 'clarificationQueries', 'noResultQueries',
 ];
 
 export class QueryMetrics {
   constructor() {
     this.counters = Object.fromEntries(COUNTERS.map((name) => [name, 0]));
-    this.latencies = { EXACT: [], STRUCTURED: [], COMPARISON: [], VECTOR: [], BLOCKED: [], NO_RESULT: [] };
+    this.latencies = { EXACT: [], STRUCTURED: [], COMPARISON: [], VECTOR: [], CLARIFICATION: [], BLOCKED: [], NO_RESULT: [] };
   }
 
   increment(name, amount = 1) {

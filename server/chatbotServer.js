@@ -139,8 +139,11 @@ export function validateChatbotApiResponse(payload) {
     throw new Error('grounded가 false인 응답에는 출처나 검사 자료를 포함할 수 없습니다.');
   }
   if (payload.grounded && payload.sources.length === 0) throw new Error('grounded 응답에는 공식 출처가 필요합니다.');
-  if (!['EXACT', 'STRUCTURED', 'COMPARISON', 'VECTOR', 'BLOCKED', 'NO_RESULT'].includes(payload.retrievalPath)) {
+  if (!['EXACT', 'STRUCTURED', 'COMPARISON', 'VECTOR', 'CLARIFICATION', 'BLOCKED', 'NO_RESULT'].includes(payload.retrievalPath)) {
     throw new Error('챗봇 응답의 retrievalPath가 올바르지 않습니다.');
+  }
+  if (payload.presentation !== undefined && payload.presentation !== 'RESULTS_ONLY') {
+    throw new Error('챗봇 응답의 presentation이 올바르지 않습니다.');
   }
   return payload;
 }

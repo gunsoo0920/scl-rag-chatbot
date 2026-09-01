@@ -1,10 +1,12 @@
 import { normalizeTestName } from './contentIdentity.js';
+import { ambiguousCategoryTerm, rerankSemanticDocuments } from './nameReranker.js';
 
 export const RETRIEVAL_PATHS = Object.freeze({
   EXACT: 'EXACT',
   STRUCTURED: 'STRUCTURED',
   COMPARISON: 'COMPARISON',
   VECTOR: 'VECTOR',
+  CLARIFICATION: 'CLARIFICATION',
   NO_RESULT: 'NO_RESULT',
 });
 
@@ -66,7 +68,23 @@ export class RetrievalRouter {
     }
     this.metrics?.increment('embeddingCalls');
     const vector = await this.embeddingService.embedQuery(analysis.original);
-    const documents = await this.store.semanticSearch(vector, { topK: this.topK, minScore: this.minScore });
+    const semanticCandidates = await this.store.semanticSearch(vector, {
+      topK: this.topK,
+      minScore: Math.min(this.minScore, 0),
+    });
+    const ambiguousTerm = ambiguousCategoryTerm(analysis.original, semanticCandidates);
+    if (ambiguousTerm) {
+      return {
+        path: RETRIEVAL_PATHS.CLARIFICATION,
+        documents: [],
+        clarification: { term: ambiguousTerm },
+      };
+    }
+    const eligibleCandidates = semanticCandidates.filter((document) => {
+      const score = document.retrieval?.score ?? document.retrieval?.similarity;
+      return score === null || score === undefined || Number(score) >= this.minScore;
+    });
+    const documents = rerankSemanticDocuments(analysis.original, eligibleCandidates, { topK: this.topK });
     return { path: documents.length ? RETRIEVAL_PATHS.VECTOR : RETRIEVAL_PATHS.NO_RESULT, documents };
   }
 }

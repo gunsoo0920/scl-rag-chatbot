@@ -6,6 +6,8 @@ const PDF_URL = 'https://f-scl.scllab.co.kr/userdata/e2e-request-form.pdf';
 const SUCCESS_RESPONSE = {
   answer: 'ALT 검체는 Serum이며, 검사 소요일은 1일입니다.',
   grounded: true,
+  retrievalPath: 'STRUCTURED',
+  presentation: 'RESULTS_ONLY',
   matchedTests: [{
     id: 'knowledge-test-10130',
     testCode: '10130',
@@ -92,7 +94,7 @@ test('질문 전송 후 loading, 검사정보, 출처, 이미지와 PDF를 표�
 
   await expect(page.getByText('공식 자료를 확인하고 있어요')).toBeVisible();
   await expect(page.getByRole('button', { name: '질문 전송' })).toBeDisabled();
-  await expect(page.getByText(SUCCESS_RESPONSE.answer)).toBeVisible();
+  await expect(page.getByText(SUCCESS_RESPONSE.answer)).toHaveCount(0);
   expect(submittedQuestion).toBe('ALT 검사 결과는 며칠 걸려?');
 
   const testCard = page.locator('.test-card');
@@ -134,7 +136,7 @@ test('Shift+Enter는 줄바꿈하고 Enter는 질문을 전송한다', async ({ 
   expect(calls).toBe(0);
 
   await input.press('Enter');
-  await expect(page.getByText(SUCCESS_RESPONSE.answer)).toBeVisible();
+  await expect(page.locator('.test-card')).toContainText('ALT');
   expect(calls).toBe(1);
 });
 
@@ -156,6 +158,42 @@ test('범위 밖 질문은 출처 카드 없이 안내한다', async ({ page }) 
 
   await expect(page.getByText('SCL 공개 검사정보에서 질문과 관련된 정보를 찾지 못했습니다.')).toBeVisible();
   await expect(page.locator('.result-panel')).toHaveCount(0);
+});
+
+test('의미 검색은 찾은 개수 문구 없이 검사 결과 카드만 표시한다', async ({ page }) => {
+  await page.route('**/api/chatbot/interpret', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { ...SUCCESS_RESPONSE, answer: '관련 검사정보를 확인했습니다.', retrievalPath: 'VECTOR', presentation: 'RESULTS_ONLY' },
+  }));
+  await page.goto('/');
+  await page.getByLabel('검사정보 질문').fill('간 기능 관련 검사');
+  await page.getByRole('button', { name: '질문 전송' }).click();
+
+  await expect(page.getByText('관련 검사정보를 확인했습니다.')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '검사 결과' })).toBeVisible();
+  await expect(page.locator('.test-card')).toContainText('ALT');
+});
+
+test('범주가 넓은 질문은 임의 결과 대신 구체적인 검사명이나 코드를 요청한다', async ({ page }) => {
+  await page.route('**/api/chatbot/interpret', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: {
+      answer: "'특검'에 해당할 수 있는 검사 항목이 여러 개 있어 하나로 특정하기 어렵습니다. 찾으시는 검사명 일부를 더 입력하거나 검사코드를 알려주세요.",
+      grounded: false,
+      matchedTests: [],
+      sources: [],
+      resources: [],
+      retrievalPath: 'CLARIFICATION',
+    },
+  }));
+  await page.goto('/');
+  await page.getByLabel('검사정보 질문').fill('특검 검사');
+  await page.getByRole('button', { name: '질문 전송' }).click();
+
+  await expect(page.getByText(/검사 항목이 여러 개/)).toBeVisible();
+  await expect(page.locator('.test-card')).toHaveCount(0);
 });
 
 test('줄바꿈과 불릿이 포함된 AI 답변을 항목별로 표시한다', async ({ page }) => {
@@ -200,7 +238,7 @@ test('API 오류를 표시하고 같은 질문을 다시 시도한다', async ({
 
   await expect(page.getByText('현재 AI 답변 기능이 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.')).toBeVisible();
   await page.getByRole('button', { name: '다시 시도' }).click();
-  await expect(page.getByText(SUCCESS_RESPONSE.answer)).toBeVisible();
+  await expect(page.locator('.test-card')).toContainText('ALT');
   await expect(page.getByTestId('message-user')).toHaveCount(1);
   expect(calls).toBe(2);
 });

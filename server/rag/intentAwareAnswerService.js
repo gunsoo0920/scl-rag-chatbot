@@ -21,6 +21,17 @@ const OUT_OF_SCOPE_RESPONSE = Object.freeze({
   retrievalPath: 'NO_RESULT',
 });
 
+function clarificationResponse(term) {
+  return {
+    answer: `'${term}'에 해당할 수 있는 검사 항목이 여러 개 있어 하나로 특정하기 어렵습니다. 찾으시는 검사명 일부를 더 입력하거나 검사코드를 알려주세요.`,
+    grounded: false,
+    matchedTests: [],
+    sources: [],
+    resources: [],
+    retrievalPath: RETRIEVAL_PATHS.CLARIFICATION,
+  };
+}
+
 const FIELD_LABELS = Object.freeze({
   testCode: '검사코드',
   testName: '검사명',
@@ -144,8 +155,7 @@ function resourceResponse(documents) {
 }
 
 function semanticResponse(documents) {
-  const lines = documents.slice(0, 5).map((document) => `• ${displayName(document)} — ${document.specimen || '검체 정보 없음'}`);
-  return groundedResponse(`의미상 관련성이 높은 SCL 검사정보 ${documents.length}건을 찾았습니다.\n${lines.join('\n')}`, documents.slice(0, 5), RETRIEVAL_PATHS.VECTOR);
+  return groundedResponse('관련 검사정보를 확인했습니다.', documents.slice(0, 5), RETRIEVAL_PATHS.VECTOR);
 }
 
 export class IntentAwareAnswerService {
@@ -173,6 +183,11 @@ export class IntentAwareAnswerService {
 
     const analysis = analyzeQuery(question);
     const retrieval = await this.router.retrieve(analysis);
+    if (retrieval.path === RETRIEVAL_PATHS.CLARIFICATION) {
+      this.metrics?.increment('clarificationQueries');
+      this.metrics?.recordLatency('CLARIFICATION', startedAt);
+      return clarificationResponse(retrieval.clarification?.term || '입력하신 표현');
+    }
     if (retrieval.path === RETRIEVAL_PATHS.NO_RESULT) {
       this.metrics?.increment('noResultQueries');
       this.metrics?.recordLatency('NO_RESULT', startedAt);
@@ -207,6 +222,9 @@ export class IntentAwareAnswerService {
       response = semanticResponse(retrieval.documents);
     } else {
       response = exactResponse(retrieval.documents);
+    }
+    if ([RETRIEVAL_PATHS.STRUCTURED, RETRIEVAL_PATHS.VECTOR].includes(response.retrievalPath)) {
+      response = { ...response, presentation: 'RESULTS_ONLY' };
     }
     this.metrics?.recordLatency(retrieval.path, startedAt);
     return response;

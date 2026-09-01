@@ -68,6 +68,7 @@ test('exact와 structured 질문은 embedding과 generation을 모두 우회한�
   const structured = await runtime.service.answer('16290 검사 며칠 걸려?');
   assert.equal(structured.retrievalPath, 'STRUCTURED');
   assert.match(structured.answer, /5일/);
+  assert.equal(structured.presentation, 'RESULTS_ONLY');
   assert.deepEqual(runtime.calls(), { embeddingCalls: 0, generationCalls: 0, storeCalls: 2 });
 });
 
@@ -95,6 +96,8 @@ test('semantic 검색만 query embedding과 Qdrant vector search를 사용한다
   assert.equal(runtime.calls().embeddingCalls, 1);
   assert.equal(runtime.calls().generationCalls, 0);
   assert.equal(runtime.metrics.snapshot().vectorQueries, 1);
+  assert.equal(response.presentation, 'RESULTS_ONLY');
+  assert.doesNotMatch(response.answer, /\d+건을 찾았습니다/);
 });
 
 test('의료 조언은 Qdrant와 AI 호출 전에 차단한다', async () => {
@@ -133,4 +136,25 @@ test('검사코드가 없는 복수 검사명 비교도 두 exact 결과를 보�
   assert.match(response.answer, /10130.*10120보다 소요일이 짧습니다/);
   assert.equal(runtime.calls().embeddingCalls, 0);
   assert.equal(runtime.calls().generationCalls, 0);
+});
+
+test('여러 범주 후보가 있는 질문은 검사 결과 대신 구체화를 요청한다', async () => {
+  const metrics = new QueryMetrics();
+  const service = new IntentAwareAnswerService({
+    router: {
+      retrieve: async () => ({
+        path: 'CLARIFICATION',
+        documents: [],
+        clarification: { term: '특검' },
+      }),
+    },
+    metrics,
+  });
+
+  const response = await service.answer('특검 검사');
+  assert.equal(response.retrievalPath, 'CLARIFICATION');
+  assert.equal(response.grounded, false);
+  assert.deepEqual(response.matchedTests, []);
+  assert.match(response.answer, /여러 개.*검사명.*검사코드/);
+  assert.equal(metrics.snapshot().clarificationQueries, 1);
 });
