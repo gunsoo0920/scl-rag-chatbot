@@ -213,6 +213,19 @@ SCL 목록과 상세를 다시 수집하고 동기화:
 
 SCL 사이트에 과도한 요청을 보내지 않도록 crawl delay와 상세 refresh 주기를 유지한다.
 
+## 13.1 급여·비급여 코드 검색이 되지 않음
+
+급여·비급여 코드 역검색은 `normalizedInsuranceCodes` keyword payload index를 사용한다.
+
+확인:
+
+1. `npm run scl:sync:data`로 기존 point에 정규화 코드를 반영했는지 확인
+2. Qdrant collection에 `normalizedInsuranceCodes` index가 있는지 확인
+3. 질문의 코드가 최소 5개 숫자와 2개 영문자를 포함하는지 확인
+4. 코드 내부 숫자가 SCL 검사코드로 잘못 추출되지 않는지 unit test 확인
+
+이 조회는 Vector Search나 Gemini를 사용하지 않는다. `etc.`, 대소문자 차이는 정규화하고 동일 코드가 여러 검사에 사용되면 복수 검사 결과를 반환한다.
+
 ## 14. 테스트 또는 빌드 실패
 
 권장 순서:

@@ -14,6 +14,7 @@ const SUCCESS_RESPONSE = {
     testName: 'ALT',
     specimen: 'Serum',
     method: 'Enzymatic method',
+    insuranceCode: 'D185000HZ',
     schedule: '월,화,수,목,금,토',
     timeType: '야간',
     turnaroundTime: '1일',
@@ -173,6 +174,21 @@ test('의미 검색은 찾은 개수 문구 없이 검사 결과 카드만 표�
   await expect(page.getByText('관련 검사정보를 확인했습니다.')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '검사 결과' })).toBeVisible();
   await expect(page.locator('.test-card')).toContainText('ALT');
+});
+
+test('급여·비급여 코드 검색 결과를 검사 카드로 표시한다', async ({ page }) => {
+  let submittedQuestion = '';
+  await page.route('**/api/chatbot/interpret', async (route) => {
+    submittedQuestion = route.request().postDataJSON().question;
+    await route.fulfill({ status: 200, contentType: 'application/json', json: SUCCESS_RESPONSE });
+  });
+  await page.goto('/');
+  await page.getByLabel('검사정보 질문').fill('급여코드 D185000HZ인 검사 알려줘');
+  await page.getByRole('button', { name: '질문 전송' }).click();
+
+  expect(submittedQuestion).toBe('급여코드 D185000HZ인 검사 알려줘');
+  await expect(page.locator('.test-card')).toContainText('ALT');
+  await expect(page.locator('.test-card')).toContainText('D185000HZ');
 });
 
 test('범주가 넓은 질문은 임의 결과 대신 구체적인 검사명이나 코드를 요청한다', async ({ page }) => {

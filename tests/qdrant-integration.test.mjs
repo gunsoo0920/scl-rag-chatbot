@@ -21,4 +21,7 @@ integrationTest('실제 Qdrant collection과 payload exact lookup을 검증한�
 
   const exactNames = await store.findByExactNames(['ALT', '존재하지 않는 검사명']);
   assert.deepEqual(exactNames.map((document) => document.testCode), ['10130']);
+
+  const insuranceCodes = await store.findByInsuranceCodes(['D517205KZ']);
+  assert.ok(insuranceCodes.some((document) => document.testCode === '16290'));
 });

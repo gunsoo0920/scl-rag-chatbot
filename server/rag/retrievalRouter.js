@@ -29,6 +29,11 @@ export class RetrievalRouter {
   }
 
   async retrieve(analysis) {
+    if (analysis.entity.insuranceCodes?.length > 0) {
+      const documents = await this.store.findByInsuranceCodes(analysis.entity.insuranceCodes);
+      return { path: documents.length ? exactPath(analysis) : RETRIEVAL_PATHS.NO_RESULT, documents };
+    }
+
     if (analysis.entity.testCodes.length > 0) {
       const documents = await this.store.findByTestCodes(analysis.entity.testCodes);
       return { path: documents.length ? exactPath(analysis) : RETRIEVAL_PATHS.NO_RESULT, documents };

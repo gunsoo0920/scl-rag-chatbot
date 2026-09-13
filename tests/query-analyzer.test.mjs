@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeQuery, extractTestNameCandidates, INTENTS } from '../server/rag/queryAnalyzer.js';
+import { analyzeQuery, extractInsuranceCodes, extractTestNameCandidates, INTENTS } from '../server/rag/queryAnalyzer.js';
 import { evaluateSafety } from '../server/rag/safetyGate.js';
 
 test('검사코드, intent, 자연어 field alias를 분석한다', () => {
@@ -46,4 +46,16 @@ test('부분 문자열을 짧은 검사명으로 만들지 않고 복수 영문 
   assert.ok(normalizedCandidates.includes('alt'));
   assert.ok(normalizedCandidates.includes('ast'));
   assert.equal(comparison.intent, INTENTS.COMPARISON);
+});
+
+test('급여·비급여 코드를 검사코드와 분리해 대소문자와 조사에 관계없이 추출한다', () => {
+  const analysis = analyzeQuery('급여코드 d185000hz로 검사 찾아줘');
+  assert.deepEqual(analysis.entity.insuranceCodes, ['D185000HZ']);
+  assert.deepEqual(analysis.entity.testCodes, []);
+  assert.equal(analysis.field, 'insuranceCode');
+  assert.deepEqual(extractInsuranceCodes('D470002HZetc.와 CX56800KZ 검사'), ['D470002HZETC', 'CX56800KZ']);
+
+  const sclCode = analyzeQuery('검사코드 16290 알려줘');
+  assert.deepEqual(sclCode.entity.insuranceCodes, []);
+  assert.deepEqual(sclCode.entity.testCodes, ['16290']);
 });

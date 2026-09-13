@@ -53,7 +53,7 @@ flowchart TD
 
 `Query Analyzer`는 AI 호출 없이 다음을 분석합니다.
 
-- Entity: 검사코드, 복수 검사코드, 질문 전체에서 만든 정규화 검사명 후보 목록
+- Entity: 검사코드, 급여·비급여 코드, 질문 전체에서 만든 정규화 검사명 후보 목록
 - Intent: `FIELD_LOOKUP`, `COMPARISON`, `SEARCH`, `EXPLANATION`, `RESOURCE_REQUEST`, `MEDICAL_ADVICE`, `UNKNOWN`
 - Field: `testCode`, `testName`, `specimen`, `method`, `insuranceCode`, `schedule`, `timeType`, `turnaroundTime`, `sourceUrl`, `pdfUrls`, `imageUrls`
 
@@ -65,7 +65,12 @@ flowchart TD
 
 ### Exact
 
-검사코드 또는 질문 어느 위치에 있든 확인된 정확한 검사명은 Qdrant payload index로 조회합니다. Query embedding, vector query, Generate 호출이 없습니다. 동일 `testCode`라도 `sampleCode`나 검체가 다르면 별도 point로 유지합니다.
+검사코드, 급여·비급여 코드 또는 질문 어느 위치에 있든 확인된 정확한 검사명은 Qdrant payload index로 조회합니다. Query embedding, vector query, Generate 호출이 없습니다. 동일 `testCode`라도 `sampleCode`나 검체가 다르면 별도 point로 유지합니다. 급여·비급여 코드는 대소문자와 `etc.` 표기를 정규화하며, 동일 코드가 여러 검사에 쓰이면 해당 검사들을 함께 반환합니다.
+
+```text
+D517205KZ 검사 알려줘
+→ α-Galactosidase (GLA)_Fabry 검사정보
+```
 
 ### Structured
 
@@ -94,8 +99,8 @@ Embedding 0회, Generate 0회입니다.
 
 - Collection: `scl_tests`
 - Vector: 768차원, Cosine
-- Payload: `id`, `testCode`, `sampleCode`, `testName`, `normalizedTestName`, `specimen`, `method`, `insuranceCode`, `schedule`, `timeType`, `turnaroundTime`, `content`, `keywords`, `sourceUrl`, `pdfUrls`, `imageUrls`, `crawledAt`, `updatedAt`, `contentHash`, `payloadHash`, `active`
-- Payload index: `id`, `testCode`, `sampleCode`, `normalizedTestName`, `contentHash`, `active`
+- Payload: `id`, `testCode`, `sampleCode`, `testName`, `normalizedTestName`, `specimen`, `method`, `insuranceCode`, `normalizedInsuranceCodes`, `schedule`, `timeType`, `turnaroundTime`, `content`, `keywords`, `sourceUrl`, `pdfUrls`, `imageUrls`, `crawledAt`, `updatedAt`, `contentHash`, `payloadHash`, `active`
+- Payload index: `id`, `testCode`, `sampleCode`, `normalizedTestName`, `normalizedInsuranceCodes`, `contentHash`, `active`
 - Preview storage: Qdrant Cloud Free cluster
 - Local storage: Docker named volume `scl_qdrant_storage`
 

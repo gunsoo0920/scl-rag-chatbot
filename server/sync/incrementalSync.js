@@ -83,7 +83,11 @@ export async function syncDocuments({
   for (let offset = 0; offset < pointsToUpsert.length; offset += 100) {
     await store.upsert(pointsToUpsert.slice(offset, offset + 100));
   }
-  for (const item of payloadQueue) await store.updatePayload(item.pointId, item.payload);
+  for (let offset = 0; offset < payloadQueue.length; offset += 100) {
+    const batch = payloadQueue.slice(offset, offset + 100);
+    if (store.updatePayloadBatch) await store.updatePayloadBatch(batch);
+    else for (const item of batch) await store.updatePayload(item.pointId, item.payload);
+  }
 
   const activeExisting = existingPoints.filter((point) => point.payload?.active !== false);
   const missingPointIds = activeExisting.filter((point) => !seenIds.has(point.payload?.id)).map((point) => point.id);

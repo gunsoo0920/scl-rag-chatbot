@@ -5,16 +5,16 @@ import { QueryMetrics } from '../server/rag/queryMetrics.js';
 import { RetrievalRouter } from '../server/rag/retrievalRouter.js';
 
 const source = (code, sample) => `https://www.scllab.co.kr/front/check/check_item_detail.do?itemcode=${code}&sampcode=${sample}`;
-function document({ code, sample = '100', name, specimen, turnaround }) {
+function document({ code, sample = '100', name, specimen, turnaround, insuranceCode = '-' }) {
   return {
     id: `knowledge-test-${code}-${sample}`, testCode: code, sampleCode: sample, testName: name,
-    specimen, method: 'LC-MS/MS', insuranceCode: '-', schedule: '월~토', timeType: '주간', turnaroundTime: turnaround,
+    specimen, method: 'LC-MS/MS', insuranceCode, schedule: '월~토', timeType: '주간', turnaroundTime: turnaround,
     content: `검사명: ${name}\nSCL 검사코드: ${code}\n검사방법: LC-MS/MS\n검체명: ${specimen}\n검사일: 월~토\n검사 구분: 주간\n검사 소요일: ${turnaround}`,
     keywords: [name], sourceUrl: source(code, sample), pdfUrls: [], imageUrls: [], resources: [], active: true,
   };
 }
 
-const fabry = document({ code: '16290', sample: '510', name: 'α-Galactosidase (GLA)_Fabry', specimen: 'Heparin W/B', turnaround: '5일' });
+const fabry = document({ code: '16290', sample: '510', name: 'α-Galactosidase (GLA)_Fabry', specimen: 'Heparin W/B', turnaround: '5일', insuranceCode: 'D517205KZ' });
 const microUrine = document({ code: '11380', sample: '400', name: 'α1-microglobulin (RU)', specimen: 'Urine,random', turnaround: '30일' });
 const microSerum = document({ code: '11380', sample: '100', name: 'α1-microglobulin (S)', specimen: 'Serum', turnaround: '30일' });
 const alt = document({ code: '10130', sample: '100', name: 'ALT', specimen: 'Serum', turnaround: '1일' });
@@ -26,6 +26,10 @@ function setup() {
   let storeCalls = 0;
   const documents = [fabry, microUrine, microSerum, alt, ast];
   const store = {
+    findByInsuranceCodes: async (codes) => {
+      storeCalls += 1;
+      return documents.filter((item) => codes.includes(item.insuranceCode.toUpperCase()));
+    },
     findByTestCodes: async (codes) => {
       storeCalls += 1;
       return documents.filter((item) => codes.includes(item.testCode));
@@ -69,6 +73,18 @@ test('exact와 structured 질문은 embedding과 generation을 모두 우회한�
   assert.equal(structured.retrievalPath, 'STRUCTURED');
   assert.match(structured.answer, /5일/);
   assert.equal(structured.presentation, 'RESULTS_ONLY');
+  assert.deepEqual(runtime.calls(), { embeddingCalls: 0, generationCalls: 0, storeCalls: 2 });
+});
+
+test('급여·비급여 코드로 검사를 역검색하고 embedding을 호출하지 않는다', async () => {
+  const runtime = setup();
+  const exact = await runtime.service.answer('D517205KZ 검사 알려줘');
+  assert.equal(exact.retrievalPath, 'EXACT');
+  assert.deepEqual(exact.matchedTests.map((item) => item.testCode), ['16290']);
+
+  const structured = await runtime.service.answer('급여코드 d517205kz인 검사 알려줘');
+  assert.equal(structured.retrievalPath, 'STRUCTURED');
+  assert.equal(structured.matchedTests[0].insuranceCode, 'D517205KZ');
   assert.deepEqual(runtime.calls(), { embeddingCalls: 0, generationCalls: 0, storeCalls: 2 });
 });
 

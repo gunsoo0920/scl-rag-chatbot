@@ -1,11 +1,12 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
-import { normalizeTestName } from './contentIdentity.js';
+import { insuranceCodeAliases, normalizeTestName } from './contentIdentity.js';
 
 const DEFAULT_INDEX_FIELDS = Object.freeze([
   ['id', 'keyword'],
   ['testCode', 'keyword'],
   ['sampleCode', 'keyword'],
   ['normalizedTestName', 'keyword'],
+  ['normalizedInsuranceCodes', 'keyword'],
   ['contentHash', 'keyword'],
   ['active', 'bool'],
 ]);
@@ -117,6 +118,13 @@ export class QdrantStore {
     return points.map((point) => payloadFromPoint(point)).filter(Boolean);
   }
 
+  async findByInsuranceCodes(insuranceCodes) {
+    const normalizedCodes = [...new Set(insuranceCodes.flatMap(insuranceCodeAliases))];
+    if (normalizedCodes.length === 0) return [];
+    const points = await this.#scroll(activeFilter([{ key: 'normalizedInsuranceCodes', match: { any: normalizedCodes } }]));
+    return points.map((point) => payloadFromPoint(point)).filter(Boolean);
+  }
+
   async findByExactName(testName) {
     return this.findByExactNames([testName]);
   }
@@ -151,6 +159,16 @@ export class QdrantStore {
 
   async updatePayload(pointId, payload) {
     await this.client.setPayload(this.collection, { wait: true, points: [pointId], payload });
+  }
+
+  async updatePayloadBatch(items) {
+    if (items.length === 0) return;
+    await this.client.batchUpdate(this.collection, {
+      wait: true,
+      operations: items.map(({ pointId, payload }) => ({
+        set_payload: { points: [pointId], payload },
+      })),
+    });
   }
 
   async deactivate(pointIds, updatedAt = new Date().toISOString()) {

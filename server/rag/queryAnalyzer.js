@@ -1,4 +1,4 @@
-import { normalizeTestName } from './contentIdentity.js';
+import { normalizeInsuranceCode, normalizeTestName } from './contentIdentity.js';
 
 export const INTENTS = Object.freeze({
   FIELD_LOOKUP: 'FIELD_LOOKUP',
@@ -33,6 +33,7 @@ const MIXED_NAME_CHARACTER = /[a-z0-9α-ω]/iu;
 const ATTACHED_PARTICLE = /^(.*[a-z0-9α-ω)\]_+\-])(?:에서는|에서|에게|한테|으로|부터|까지|처럼|보다|하고|이랑|랑|와|과|은|는|이|가|을|를|의|에|도|만|야)$/iu;
 const MAX_NAME_CANDIDATES = 128;
 const MAX_CANDIDATE_WORDS = 8;
+const INSURANCE_CODE_CANDIDATE = /[a-z][a-z0-9.]{7,20}/giu;
 const NAME_CANDIDATE_STOP_WORDS = new Set([
   '검사', '검사는', '검사의', '검사를', '검사가', '검사에서', '검사로', '검사만',
   '결과', '결과는', '정보', '관련', '관련해서', '대해서', '대한', '어떤', '무슨',
@@ -77,6 +78,23 @@ function meaningfulNameCandidate(value) {
   return normalized.length >= 2 && !NAME_CANDIDATE_STOP_WORDS.has(normalized);
 }
 
+function looksLikeInsuranceCode(value) {
+  const normalizedCode = normalizeInsuranceCode(value);
+  if (normalizedCode.length < 8 || normalizedCode.length > 18) return false;
+  const digitCount = (normalizedCode.match(/\d/g) ?? []).length;
+  const letterCount = (normalizedCode.match(/[A-Z]/g) ?? []).length;
+  return /^[A-Z][A-Z0-9]+$/u.test(normalizedCode) && digitCount >= 5 && letterCount >= 2;
+}
+
+function insuranceCodeMatches(question) {
+  return [...String(question).matchAll(INSURANCE_CODE_CANDIDATE)]
+    .filter((match) => looksLikeInsuranceCode(match[0]));
+}
+
+export function extractInsuranceCodes(question) {
+  return [...new Set(insuranceCodeMatches(question).map((match) => normalizeInsuranceCode(match[0])))];
+}
+
 export function extractTestNameCandidates(question, codes = [], field = null) {
   const candidates = [];
   const seen = new Set();
@@ -116,7 +134,11 @@ export function extractTestNameCandidates(question, codes = [], field = null) {
 export function analyzeQuery(question) {
   const value = String(question ?? '').trim();
   const normalizedQuestion = normalizeTestName(value);
-  const testCodes = [...new Set(value.match(/(?<!\d)\d{4,8}(?!\d)/g) ?? [])];
+  const insuranceMatches = insuranceCodeMatches(value);
+  const insuranceCodes = [...new Set(insuranceMatches.map((match) => normalizeInsuranceCode(match[0])))];
+  let valueWithoutInsuranceCodes = value;
+  for (const match of insuranceMatches) valueWithoutInsuranceCodes = valueWithoutInsuranceCodes.replaceAll(match[0], ' ');
+  const testCodes = [...new Set(valueWithoutInsuranceCodes.match(/(?<!\d)\d{4,8}(?!\d)/g) ?? [])];
   const field = findField(normalizedQuestion);
   let intent;
   if (COMPARISON_PATTERN.test(value)) intent = INTENTS.COMPARISON;
@@ -134,6 +156,7 @@ export function analyzeQuery(question) {
     normalizedQuestion,
     entity: {
       testCodes,
+      insuranceCodes,
       testName: testNameCandidates[0] ?? null,
       testNameCandidates,
       multiple: testCodes.length > 1,

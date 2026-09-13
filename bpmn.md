@@ -36,6 +36,8 @@ flowchart TD
     end
 
     subgraph SEARCH_LANE["검색 · Qdrant Cloud"]
+        INSURANCE{"급여·비급여 코드 존재?"}
+        INSURANCE_SEARCH["normalizedInsuranceCodes payload 검색"]
         CODE{"검사코드 존재?"}
         CODE_SEARCH["testCode payload 검색"]
         NAME{"정확한 검사명 일치?"}
@@ -68,8 +70,10 @@ flowchart TD
     SAFETY -->|예| BLOCK --> RESPONSE_VALID
     SAFETY -->|아니오| CASUAL
     CASUAL -->|예| SCOPE --> RESPONSE_VALID
-    CASUAL -->|아니오| ANALYZE --> CODE
+    CASUAL -->|아니오| ANALYZE --> INSURANCE
 
+    INSURANCE -->|예| INSURANCE_SEARCH --> FOUND
+    INSURANCE -->|아니오| CODE
     CODE -->|예| CODE_SEARCH --> FOUND
     CODE -->|아니오| NAME
     NAME -->|예| NAME_SEARCH

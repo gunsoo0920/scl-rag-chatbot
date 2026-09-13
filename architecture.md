@@ -84,7 +84,9 @@ flowchart TD
     CASUAL -->|예| SCOPE["검사정보 전용 안내"]
     CASUAL -->|아니오| ANALYZE["Intent · Entity · Field 분석"]
 
-    ANALYZE --> CODE{"검사코드가 있는가?"}
+    ANALYZE --> INSURANCE{"급여·비급여 코드가 있는가?"}
+    INSURANCE -->|예| INSURANCE_SEARCH["Qdrant normalizedInsuranceCodes<br/>payload 검색"]
+    INSURANCE -->|아니오| CODE{"검사코드가 있는가?"}
     CODE -->|예| CODE_SEARCH["Qdrant testCode payload 검색"]
     CODE -->|아니오| NAME{"질문 전체에서 검사명 후보가 있는가?"}
     NAME -->|예| NAME_SEARCH["Qdrant normalizedTestName<br/>match any 1회"]
@@ -93,6 +95,7 @@ flowchart TD
     NAME -->|아니오| VECTOR["Gemini query embedding"]
     VECTOR --> VECTOR_SEARCH["Qdrant vector query<br/>top-K · min score · active=true"]
     CODE_SEARCH --> SELECT{"답변 정책 선택"}
+    INSURANCE_SEARCH --> SELECT
     VECTOR_SEARCH --> SELECT
 
     SELECT -->|FIELD_LOOKUP| FIELD["필드값 결정적 조립"]
@@ -118,7 +121,7 @@ flowchart TD
 
 | 구분 | 조건 | 외부 AI 호출 | 결과 |
 |---|---|---:|---|
-| Payload 검색 | 검사코드 또는 정확한 검사명 | 0 | Qdrant의 구조화 payload 조회 |
+| Payload 검색 | 검사코드, 급여·비급여 코드 또는 정확한 검사명 | 0 | Qdrant의 구조화 payload 조회 |
 | Vector 검색 | 코드/정확한 이름으로 찾지 못함 | Embedding 1회 | Qdrant cosine 유사도 검색 |
 | 결정적 답변 | 필드, 목록, 자료, 비교, 일반 검색 | Generate 0회 | 저장된 사실을 프로그램이 조립 |
 | 생성 답변 | `EXPLANATION` intent | Generate 1회 | 검색 근거 기반 설명 후 검증 |
@@ -146,7 +149,7 @@ flowchart TD
 ### Safety Gate와 Query Analyzer
 
 - 개인 검사결과 해석, 진단, 치료·약물, 개인 맞춤 검사 추천을 검색 전에 차단
-- LLM 호출 없이 검사코드, 질문 전체의 검사명 후보 목록, intent, field 분석
+- LLM 호출 없이 검사코드, 급여·비급여 코드, 질문 전체의 검사명 후보 목록, intent, field 분석
 - 검사명 위치를 앞부분으로 고정하지 않고 영문·숫자·그리스 문자 토큰과 최대 8어절 후보를 최대 128개 생성
 - 후보별 요청 대신 Qdrant `normalizedTestName match any` 한 번으로 실제 검사명만 검증
 - 지원 intent: `FIELD_LOOKUP`, `COMPARISON`, `SEARCH`, `EXPLANATION`, `RESOURCE_REQUEST`, `UNKNOWN`
@@ -155,7 +158,7 @@ flowchart TD
 
 - Collection: `scl_tests`
 - Vector: 768차원, Cosine
-- Exact index: `id`, `testCode`, `sampleCode`, `normalizedTestName`, `contentHash`, `active`
+- Exact index: `id`, `testCode`, `sampleCode`, `normalizedTestName`, `normalizedInsuranceCodes`, `contentHash`, `active`
 - 런타임 필터: `active=true`
 - Payload에는 검사명, 검체, 방법, 보험코드, 검사일, 소요일, 공식 URL, 이미지/PDF, hash가 저장됨
 

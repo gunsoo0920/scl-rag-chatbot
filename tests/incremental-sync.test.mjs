@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { toQdrantPayload } from '../server/rag/contentIdentity.js';
+import { insuranceCodeAliases, normalizeInsuranceCode, toQdrantPayload } from '../server/rag/contentIdentity.js';
 import { syncDocuments } from '../server/sync/incrementalSync.js';
 
 function document(id, turnaroundTime = '5일', sourceUrl = `https://www.scllab.co.kr/${id}`) {
@@ -21,6 +21,7 @@ function fakeStore(existingDocuments) {
     listAll: async () => points,
     upsert: async (values) => calls.upserts.push(...values),
     updatePayload: async (pointId, payload) => calls.payloads.push({ pointId, payload }),
+    updatePayloadBatch: async (items) => calls.payloads.push(...items),
     deactivate: async (ids) => calls.deactivated.push(...ids),
     calls,
   };
@@ -56,6 +57,15 @@ test('metadata만 변경하면 vector를 재생성하지 않고 payload만 갱�
   assert.equal(report.embeddingCalls, 0);
   assert.equal(store.calls.upserts.length, 0);
   assert.equal(store.calls.payloads.length, 1);
+});
+
+test('급여·비급여 코드를 Qdrant keyword 검색용 값으로 정규화한다', () => {
+  assert.equal(normalizeInsuranceCode('d470002hzetc.'), 'D470002HZETC');
+  assert.deepEqual(insuranceCodeAliases('D470002HZetc.'), ['D470002HZETC', 'D470002HZ']);
+  assert.deepEqual(insuranceCodeAliases('-'), []);
+
+  const payload = toQdrantPayload({ ...document('test-10135'), insuranceCode: 'D185000HZ' });
+  assert.deepEqual(payload.normalizedInsuranceCodes, ['D185000HZ']);
 });
 
 test('크롤 실패가 있으면 사라진 데이터를 비활성화하지 않는다', async () => {

@@ -20,6 +20,20 @@ export function normalizeTestName(value) {
     .trim();
 }
 
+export function normalizeInsuranceCode(value) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+export function insuranceCodeAliases(value) {
+  const normalizedCode = normalizeInsuranceCode(value);
+  if (!normalizedCode) return [];
+  const baseCode = normalizedCode.replace(/ETC\d*$/u, '');
+  return [...new Set([normalizedCode, baseCode].filter(Boolean))];
+}
+
 export function semanticContent(document) {
   return {
     testName: document.testName,
@@ -37,11 +51,13 @@ export function calculateContentHash(document) {
 }
 
 export function calculatePayloadHash(document) {
+  const insuranceCode = document.insuranceCode ?? document.metadata?.insuranceCode;
   return hash({
     id: document.id,
     testCode: document.testCode,
     sampleCode: document.sampleCode,
-    insuranceCode: document.insuranceCode ?? document.metadata?.insuranceCode,
+    insuranceCode,
+    normalizedInsuranceCodes: insuranceCodeAliases(insuranceCode),
     keywords: document.keywords,
     sourceUrl: document.sourceUrl,
     pdfUrls: document.pdfUrls,
@@ -60,6 +76,7 @@ export function qdrantPointId(documentId) {
 }
 
 export function toQdrantPayload(document, { now = new Date().toISOString(), active = true } = {}) {
+  const insuranceCode = document.insuranceCode ?? document.metadata?.insuranceCode ?? '';
   return {
     id: document.id,
     testCode: String(document.testCode ?? ''),
@@ -68,7 +85,8 @@ export function toQdrantPayload(document, { now = new Date().toISOString(), acti
     normalizedTestName: normalizeTestName(document.testName),
     specimen: document.specimen ?? '',
     method: document.method ?? '',
-    insuranceCode: document.insuranceCode ?? document.metadata?.insuranceCode ?? '',
+    insuranceCode,
+    normalizedInsuranceCodes: insuranceCodeAliases(insuranceCode),
     schedule: document.schedule ?? '',
     timeType: document.timeType ?? '',
     turnaroundTime: document.turnaroundTime ?? '',
